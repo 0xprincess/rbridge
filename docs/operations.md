@@ -111,7 +111,8 @@ sudo systemctl restart frp-tunnel-transport
 ```
 
 SSH keepalives detect lost connections, systemd restarts transport, and FRP
-retries registration. Existing connections can disconnect during any restart,
+retries registration. Starting transport also starts its FRP client, including
+after an explicit stop/start maintenance cycle. Existing connections can disconnect during any restart,
 computer sleep or network outage. Reconnect after registration recovers.
 
 Edit private services, validate, then deploy both hosts using the same files.
