@@ -1,44 +1,55 @@
 # FRP tunnel
 
-Expose key-only SSH on Ubuntu or Ubuntu WSL2 through a public relay, without
-router port forwarding or a system proxy. Deployment is repeatable with Ansible;
-systemd maintains the connection and a Windows logon task keeps WSL running.
+Publish web applications and TCP services from Ubuntu or Ubuntu WSL2 through a
+relay you control, without router port forwarding or a system proxy. Ansible
+manages FRP over an outbound, host-pinned SSH connection; systemd reconnects it.
+Caddy publishes HTTPS, with optional Basic authentication or OIDC browser login.
 
-The default transport carries FRP through a dedicated outbound SSH connection.
-This is useful where direct FRP connections establish successfully but stall when
-carrying data. Network filtering differs between providers: verify the resulting
-tunnel on your own network.
+A self-hosted alternative to Cloudflare Tunnel for publishing web apps and TCP
+services—not a replacement for Cloudflare's global network, WAF, CDN, VPN, or
+identity platform. You provision, secure, and pay for the relay. Native TCP
+clients need no tunnel-specific software.
+
+The [`v0.1` release](https://github.com/0xprincess/frp-tunnel/releases/tag/v0.1)
+preserves the complete SSH-only baseline. Generalized publishing is developed on
+`dev`; [deployment](docs/deployment.md) describes migration and rollback.
 
 ```mermaid
 flowchart LR
-    visitor[SSH client with login key] -->|public TCP 2222| server[Relay: FRP server]
-    client[Ubuntu / WSL: FRP client] -->|encrypted SSH transport, outbound TCP 22| relay[Restricted relay account]
-    relay -->|loopback TCP 7000| server
-    server -. reverse tunnel .-> client
-    client -->|loopback TCP 2222| ssh[Dedicated key-only SSH service]
+    browser[Browser] -->|HTTPS 443| web[Caddy: routing and access policy]
+    visitor[TCP client] -->|explicit public port| socket[Socket proxy]
+    web --> loopback[Relay-local FRP service ports]
+    socket --> loopback
+    client[Ubuntu / WSL FRP client] -->|outbound encrypted SSH| relay[Restricted relay account]
+    relay -->|loopback control port| loopback
+    loopback -. reverse tunnel .-> client
+    client --> backend[Configured application backends]
 ```
 
-## What is included
+## Included
 
-- Ubuntu 24.04+ server and Linux/WSL client roles, for amd64 and arm64.
-- Pinned FRP releases, verified SHA256 downloads, and unprivileged FRP services.
-- A forwarding-only relay account restricted to the FRP control endpoint.
-- A separate SSH instance that accepts one configured public key and rejects
-  passwords, keyboard-interactive authentication, and root login.
-- Automatic reconnection and configurable Windows logon startup.
-- Private input generation, commit/push privacy hooks, CI integration tests, and
-  an optional manual GitHub Actions relay deployment.
+- Multiple named TCP and HTTP services, with one validated configuration model.
+- Custom web hostnames, automatic HTTPS certificates/renewals, WebSockets and
+  streaming responses; verified HTTPS backends are supported.
+- Explicit per-web-app `public`, `application`, `basic`, or `oidc` access policy.
+- Optional dedicated key-only SSH service, separate login/relay keys, and a
+  forwarding-only relay account. Native host SSH remains separate.
+- Ubuntu 24.04+ / systemd roles for amd64 and arm64, checksum-pinned FRP, Caddy
+  and oauth2-proxy releases, and unprivileged services.
+- Configuration validation, layered `doctor` diagnostics, and stale service
+  cleanup when removing publications.
+- Private input generation, CI deployment regressions and an optional manual
+  GitHub Actions relay deployment. Windows logon startup can keep WSL alive.
 
-Real endpoints, accounts, keys, tokens, inventories, and logs belong outside this
-checkout. The examples contain documentation-only values. The project does not
-contain a live deployment's configuration or key material.
+All raw FRP service ports and management APIs stay on relay/client loopback.
+Only explicit TCP publications and Caddy's web listeners are public. A web
+application has no public raw port that could bypass its access policy.
 
 ## Quick start
 
-Run the deployment controller inside Ubuntu/WSL or another Linux environment with
-Python 3.11+, OpenSSH client tools, and sudo. Both managed hosts need Ubuntu 24.04+
-with systemd; WSL must already have systemd enabled. The client login account must
-exist and the chosen backend port must be free.
+Use a Linux/WSL controller with Python 3.11+, OpenSSH and sudo. Both managed hosts
+need Ubuntu 24.04+ with systemd; enable systemd in WSL first. The default SSH
+preset requires an existing non-root client login account.
 
 ```bash
 python3 -m venv .venv
@@ -48,14 +59,9 @@ export ANSIBLE_CONFIG="$PWD/ansible/ansible.cfg"
 export PRIVATE="$HOME/.config/frp-tunnel-private"
 ```
 
-Obtain the relay's Ed25519 SSH host key through a trusted existing connection or
-provider console, verify its fingerprint independently, and save an unhashed
-`known_hosts` entry outside the checkout. A network `ssh-keyscan` result alone
-does not establish trust. For a non-default relay SSH port, the entry must use
-`[host]:port`.
-
-Generate fresh, separate relay and login keys plus a random FRP token. Use a Linux
-filesystem for the output, not a WSL shared `/mnt` directory:
+Obtain the relay's Ed25519 host key through a trusted connection or provider
+console and independently verify its fingerprint. Save an unhashed `known_hosts`
+entry outside the checkout; `ssh-keyscan` alone does not establish trust.
 
 ```bash
 python scripts/create-secrets.py \
@@ -65,54 +71,87 @@ python scripts/create-secrets.py \
   --known-hosts "$HOME/.config/verified-relay-hosts"
 ```
 
-Replace the documentation-only hostname and username with your own private
-inputs. The generator refuses existing directories and Git checkouts; it writes
-mode-600 files in a mode-700 directory. `login_id_ed25519` is the key used to access
-the client; the distinct relay key is only for automatic forwarding. You can
-instead supply an existing Ed25519 login public key in `secrets.yml`, keeping its
-private half outside the repository.
+Replace the documentation-only hostname and account. The generator refuses
+existing directories and Git checkouts; use a Linux filesystem, not WSL `/mnt`.
+It creates private `inventory.yml`, editable `services.yml`, `secrets.yml`, and
+separate relay/login keys. Review inventory administration and sudo settings.
 
-Review the generated inventory privately. Set the relay administration account,
-ports, and any Ansible privilege escalation settings you need. Then deploy the
-server and client separately:
+The generated `services.yml` contains the SSH preset. Add services there, for
+example:
+
+```yaml
+frp_server_address: relay.example.invalid
+frp_managed_ssh: true
+frp_services:
+  - name: ssh
+    protocol: tcp
+    backend: 127.0.0.1:2222
+    relay_port: 12222
+    public_port: 2222
+  - name: website
+    protocol: http
+    hostname: www.example.invalid
+    backend: http://127.0.0.1:3000
+    relay_port: 12300
+    access:
+      mode: public
+```
+
+`relay_port` is private to the relay. Public TCP ports must be explicit, distinct
+from all relay-local listeners, and at least 1024. HTTP services require a
+hostname and explicit access policy. `public` intentionally permits everyone;
+use [access policies](docs/deployment.md#web-access-policies) for private tools.
+For web-only installations, use `--services-file` with your configuration and
+`--no-managed-ssh`; no client login account/key is then required.
 
 ```bash
+python scripts/tunnel.py validate \
+  --config "$PRIVATE/services.yml" --config "$PRIVATE/secrets.yml"
 export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$PRIVATE/known_hosts -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
-ansible-playbook -i "$PRIVATE/inventory.yml" -e "@$PRIVATE/secrets.yml" \
+ansible-playbook -i "$PRIVATE/inventory.yml" \
+  -e "@$PRIVATE/services.yml" -e "@$PRIVATE/secrets.yml" \
   --private-key "$HOME/.ssh/relay-admin" --limit frp_servers ansible/deploy.yml
-ansible-playbook -i "$PRIVATE/inventory.yml" -e "@$PRIVATE/secrets.yml" \
+ansible-playbook -i "$PRIVATE/inventory.yml" \
+  -e "@$PRIVATE/services.yml" -e "@$PRIVATE/secrets.yml" \
   --ask-become-pass --limit frp_clients ansible/deploy.yml
 ```
 
-Allow inbound TCP on the relay's existing SSH port and the chosen public tunnel
-port. The FRP control port stays on loopback and must not be opened in a firewall.
-The roles leave firewall policy to the administrator and add an SSH policy scoped
-to the dedicated relay account. See [deployment prerequisites](docs/deployment.md) for relay
-SSH policy, upgrades, and coexistence with an existing tunnel.
-
-From a machine holding the login key:
+Allow relay inbound SSH, chosen public TCP ports, and TCP 80/443 for web
+publishing. Point each web hostname's DNS to the relay; automatic public
+certificates require reachable ACME challenges. Do not open FRP control, relay
+service, OIDC or admin API ports. Firewall policy remains administrator-owned.
 
 ```bash
 ssh -p 2222 -i "$PRIVATE/login_id_ed25519" developer@relay.example.invalid
 ```
 
-Verify the client SSH host fingerprint through a trusted client session before
-accepting it on first login. The relay's SSH host key and the tunneled client's
-SSH host key are different identities.
+Verify the tunneled client's SSH fingerprint independently before first login;
+it is not the relay's fingerprint. Web clients use `https://` and the configured
+hostname. HTTPS terminates at the relay, which can read web traffic.
 
-For WSL, register startup from Windows PowerShell after deploying the client:
+## Operations and verification
+
+Run diagnostics from a copy of this repository on the installed host:
+
+```bash
+sudo python3 scripts/tunnel.py doctor \
+  --config "$PRIVATE/services.yml" --role client --json
+# Use --role server on the relay. OIDC configs also need --config secrets.yml.
+```
+
+Doctor distinguishes transport, registration, backend and public ingress.
+A TCP handshake is not an application health check; a Basic challenge or OIDC
+redirect does not prove an authenticated login. See [operations](docs/operations.md).
+
+For WSL, run from Windows PowerShell after deployment:
 
 ```powershell
 ./scripts/register-wsl-startup.ps1 -Distribution Ubuntu-24.04
 ```
 
-This starts at Windows user logon, not before logon or while the computer sleeps.
-Systemd services alone do not keep a WSL distribution alive. After a deliberate
-`wsl --shutdown`, restart the task or open WSL; a manual shutdown can end the
-keepalive process normally. [Operations](docs/operations.md) covers service and
-task control.
-
-## Validation and deployment workflows
+Startup occurs at user logon, not before logon or during sleep. After deliberate
+`wsl --shutdown`, restart the task or open WSL. Network filtering differs by
+provider; exercise real payloads from your intended client network.
 
 ```bash
 python -m unittest discover -s tests -v
@@ -120,21 +159,16 @@ ansible-playbook -i ansible/inventory.example.yml ansible/deploy.yml --syntax-ch
 python scripts/check-privacy.py --history
 ```
 
-CI runs these checks, parses the PowerShell startup script, and provisions an
-ephemeral Ubuntu runner with the real Ansible roles. Integration tests verify
-key-only login, 1 MiB transfers in both directions, relay restrictions, recovery
-after restarting the transport, and a second deployment with no changes.
+[Contributing](CONTRIBUTING.md) documents the destructive disposable-host field
+suite: real FRP/OpenSSH, Caddy TLS, Dex/oauth2-proxy browser login, authorization
+failures, transfers, streaming, restart recovery, removal and idempotence.
 
-The **Deploy relay** workflow is manual, restricted to `main`, and uses the
-`production` environment. Configure its private inputs and environment controls
-as described in [GitHub Actions deployment](docs/deployment.md#github-actions).
-Deploy the WSL client locally; a hosted runner cannot reach a private local WSL
-instance.
+## Privacy and security
 
-## Privacy, security, and contributions
-
-Before publishing, read [the privacy checklist](docs/privacy.md). Install local
-hooks and use a generic commit identity if you want anonymous commit metadata:
+Keep endpoints, accounts, keys, passwords, tokens, inventories and logs outside
+this checkout. Read [privacy](docs/privacy.md) and [security](SECURITY.md) before
+publishing. Hooks and CI detect common leaks, not every identifier. Install hooks
+and a generic identity if anonymous Git metadata is desired:
 
 ```bash
 git config --local core.hooksPath .githooks
@@ -143,12 +177,5 @@ git config --local user.email 'contributors@example.invalid'
 git config --local commit.gpgsign false
 ```
 
-Hooks and CI catch common key material, tokens, deployment IPs, personal paths,
-and email addresses. They cannot prove that arbitrary prose, hostnames, logs, or
-Git metadata contain no identifying information. Review the staged diff and
-history before publication. See [CONTRIBUTING](CONTRIBUTING.md) and
-[SECURITY](SECURITY.md).
-
-This project's code is MIT licensed. Downloaded FRP binaries remain under
-[FRP's Apache-2.0 license](https://github.com/fatedier/frp/blob/dev/LICENSE);
-they are downloaded during deployment and are not committed here.
+This project's code is MIT licensed. Downloaded FRP, Caddy and oauth2-proxy
+binaries retain their upstream licenses and are not committed here.

@@ -22,17 +22,15 @@ https://{{ app.hostname }} {
 {% endif %}
 	route {
 		# The Internet is not a trusted upstream proxy or identity provider.
-		request_header {
-			-Forwarded
-			-X-Forwarded-*
-			-X-Auth-*
-			-X-Authenticated-*
-			-X-Remote-*
-			-Remote-*
-			-X-Webauth-*
-			-X-Original-*
-			-X-Real-IP
-		}
+		request_header -Forwarded
+		request_header -X-Forwarded-*
+		request_header -X-Auth-*
+		request_header -X-Authenticated-*
+		request_header -X-Remote-*
+		request_header -Remote-*
+		request_header -X-Webauth-*
+		request_header -X-Original-*
+		request_header -X-Real-IP
 {% if app.access.mode == 'basic' %}
 		basic_auth bcrypt {
 {% for username, password_hash in app.access.users | dictsort %}

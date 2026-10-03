@@ -37,7 +37,8 @@ def findings(data):
             found.append((data.count(b"\n", 0, match.start()) + 1, "deployment IP address"))
     for match in EMAIL_PATTERN.finditer(data):
         domain = match.group().split(b"@", 1)[1].lower()
-        if not domain.endswith((b".invalid", b".example")):
+        # RFC 2606 reserves these TLDs for examples and isolated test identities.
+        if not domain.endswith((b".invalid", b".example", b".test")):
             found.append((data.count(b"\n", 0, match.start()) + 1, "personal email address"))
     return sorted(set(found))
 

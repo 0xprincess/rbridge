@@ -33,7 +33,7 @@ def _keys(value, allowed, required, field):
 
 
 def _port(value, field, minimum=1024):
-    if type(value) is not int or not minimum <= value <= 65535:
+    if not isinstance(value, int) or isinstance(value, bool) or not minimum <= value <= 65535:
         _fail(field, f"must be an integer from {minimum} to 65535")
     return value
 
