@@ -440,6 +440,13 @@ class Suite:
                     login.fill("allowed@example.test" if allowed else "denied@example.test")
                     page.locator('input[name="password"]').fill(self.login_password if allowed else self.denied_password)
                     page.locator('button[type="submit"]').click()
+                    page.wait_for_function("""prefix => location.href.startsWith(prefix) ||
+                      Array.from(document.querySelectorAll('button, input[type="submit"]'))
+                        .some(button => (button.textContent.trim() || button.value) === 'Grant Access')
+                    """, arg=f"https://oidc.{self.domain}/", timeout=30000)
+                    consent = page.get_by_role("button", name="Grant Access", exact=True)
+                    if consent.count():
+                        consent.click()
                     page.wait_for_url(f"https://oidc.{self.domain}/**", timeout=30000)
                     body = page.locator("body").inner_text()
                     require(any("/auth?" in url for url in requests) and
