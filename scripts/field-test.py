@@ -147,7 +147,7 @@ class Suite:
             "frp_server_admin_port": 17401,
             "frp_oidc": {"issuer_url": f"https://idp.{self.domain}", "client_id": "field-app",
                          "client_secret": os.urandom(32).hex(),
-                         "cookie_secret": base64.b64encode(os.urandom(32)).decode()},
+                         "cookie_secret": base64.urlsafe_b64encode(os.urandom(32)).decode()},
         }
         if not self.args.public_tls:
             self.values["frp_web_tls"] = "internal"

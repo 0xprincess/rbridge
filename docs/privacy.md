@@ -27,7 +27,8 @@ The scanner reports paths, line numbers, and categories while withholding matche
 values. It catches recognizable private/public SSH keys, common access token
 formats, URL passwords, non-example IPv4 endpoints, personal filesystem paths,
 and email addresses. It intentionally permits loopback, unspecified addresses,
-RFC 5737 documentation networks, and `.invalid`/`.example` email domains.
+RFC 5737 documentation networks, and RFC 2606 `.invalid`/`.example`/`.test`
+email domains. Publicly routable email domains remain prohibited.
 
 This is a defense in depth check, not a complete identity or secret detector.
 Arbitrary DNS names, encoded secrets, prose, IPv6 endpoints, filenames, timing,
@@ -40,6 +41,12 @@ Deployment outputs are never uploaded as CI artifacts. Private workflow values
 are masked before provisioning, and secret Ansible tasks suppress logs and diffs.
 Custom debugging and error messages can still expose identifying details: avoid
 verbose production runs and review any logs before sharing them.
+
+OIDC client/cookie secrets, Basic password hashes, admin API credentials,
+certificate keys and browser session cookies also belong outside the checkout.
+Field-test `--artifacts` output can contain these values and must never be
+uploaded as public CI artifacts. Delete retained test inputs after destroying
+their disposable infrastructure.
 
 If a secret enters Git history, rotate/revoke it first. Deleting the file in a new
 commit does not remove previous blobs, forks, clones, cached patches, or logs.

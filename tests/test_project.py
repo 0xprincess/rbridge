@@ -37,9 +37,10 @@ class PrivacyTests(unittest.TestCase):
 
     def test_documentation_addresses_are_accepted(self):
         self.assertFalse(privacy.findings(b"127.0.0.1 0.0.0.0 192.0.2.1 203.0.113.10"))
+        self.assertFalse(privacy.findings(b"fixture@example.test"))
 
     def test_email_and_url_credentials_are_rejected(self):
-        candidate = b"person" + b"@mail.test https://" + b"user:pass@relay.example.invalid"
+        candidate = b"person" + b"@mail.net https://" + b"user:pass@relay.example.invalid"
         kinds = {kind for _, kind in privacy.findings(candidate)}
         self.assertIn("personal email address", kinds)
         self.assertIn("credential in URL", kinds)
