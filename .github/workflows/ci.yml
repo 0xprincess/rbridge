@@ -32,7 +32,7 @@ jobs:
 
   deployment-integration:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
@@ -43,10 +43,14 @@ jobs:
       - name: Prepare an isolated tool environment
         run: |
           python -m venv "$RUNNER_TEMP/frp-tools"
-          "$RUNNER_TEMP/frp-tools/bin/python" -m pip install -r requirements-dev.txt
+          "$RUNNER_TEMP/frp-tools/bin/python" -m pip install -r requirements-dev.txt -r scripts/fixtures/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y libnss3-tools
+          sudo env PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/frp-browsers" \
+            "$RUNNER_TEMP/frp-tools/bin/python" -m playwright install --with-deps chromium
       - name: Provision and test the disposable runner VM
         run: |
-          sudo env PATH="$RUNNER_TEMP/frp-tools/bin:$PATH" \
+          sudo env PATH="$RUNNER_TEMP/frp-tools/bin:$PATH" PLAYWRIGHT_BROWSERS_PATH="$RUNNER_TEMP/frp-browsers" \
             "$RUNNER_TEMP/frp-tools/bin/python" scripts/integration-test.py \
             --user "$(id -un)" --apply-to-disposable-host
 
