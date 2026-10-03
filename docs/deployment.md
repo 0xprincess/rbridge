@@ -129,6 +129,11 @@ revokes old registrations and connections when the relay restarts, preventing
 an old protected backend from appearing behind a newly public route during a
 partial deployment. A relay-only cutover fails closed until the client is updated.
 
+Before installing a changed revision credential, the relay stops its owned FRP
+and web services. A failed relay apply aborts the automatic client rollout; even
+a subsequent client-only apply cannot serve new registrations under the old web
+access policy. Correct the relay failure and apply both hosts to restore ingress.
+
 ## HTTPS and DNS
 
 Point every published hostname to the relay. Permit inbound TCP 80/443 and allow
@@ -203,7 +208,7 @@ Keep administrative access and prior private inputs before deploying. Fresh
 installs require unused dedicated accounts and refuse unmarked project
 configuration. Managed account names cannot be reassigned in place. Reapplying
 identical inputs is intended to produce zero changes; runtime configuration is
-validated before replacement. Manifest/policy/key changes revoke all tunnel
+validated before replacement. Manifest/policy or FRP-token changes revoke all tunnel
 registrations and can disconnect unrelated services sharing this tunnel.
 
 For an existing `v0.1` installation:
