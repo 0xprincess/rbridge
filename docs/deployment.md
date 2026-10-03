@@ -146,7 +146,9 @@ HTTPS terminates at the relay. The relay can read HTTP traffic; it is not an
 end-to-end encrypted web service from browser to origin. HTTPS backends still
 receive certificate-chain and hostname verification using the `backend` host as
 TLS identity. Install a private backend CA in the relay's normal OS trust store
-when appropriate; there is no insecure-verification switch. The application
+when appropriate, then restart `frp-tunnel-web` to reload cached system roots;
+a configuration reload alone is insufficient after CA rotation. There is no
+insecure-verification switch. The application
 receives its public hostname as `Host`. WebSockets and streaming are supported.
 
 `frp_web_tls: internal` uses Caddy's local CA, not a browser-trusted public

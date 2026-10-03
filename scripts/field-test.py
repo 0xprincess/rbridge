@@ -209,6 +209,10 @@ class Suite:
             entries = self.address + " " + " ".join(f"{name}.{self.domain}" for name in NAMES)
             self.remote(host, "printf '%s\\n' " + shlex.quote(entries + " # frp-field-test") +
                         " '127.0.0.1 origin.fixture.test # frp-field-test' >> /etc/hosts; update-ca-certificates")
+        # Go caches system roots within the Caddy process. A recovered run has a
+        # newly generated fixture CA; reload alone would retain the old roots.
+        self.remote("relay", "if systemctl is-active --quiet frp-tunnel-web.service; "
+                    "then systemctl restart frp-tunnel-web.service; fi")
         self.remote("client", "(command -v docker >/dev/null || "
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io) && systemctl start docker")
         for name in ("origin.crt", "origin.key"):
