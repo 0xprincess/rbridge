@@ -12,6 +12,7 @@
 - name: Deploy the relay server
   hosts: frp_servers
   become: true
+  any_errors_fatal: true
   roles:
     - frp_common
     - frp_server
