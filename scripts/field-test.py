@@ -587,6 +587,28 @@ print(json.dumps(result,sort_keys=True))
                 "Repeated deployment was not idempotent")
         self.mark("invalid/colliding configuration rejected without mutation; second apply changes zero")
 
+    def failed_web_rollout(self):
+        revised = copy.deepcopy(self.values)
+        public = next(service for service in revised["frp_services"] if service["name"] == "public")
+        basic = next(service for service in revised["frp_services"] if service["name"] == "basic")
+        public["access"] = copy.deepcopy(basic["access"])
+        # Fail after shared validation, while installing the relay's web policy.
+        revised["frp_web_tls"] = "invalid-fixture-mode"
+        result = self.deploy(revised, fail=True)
+        require(result.returncode != 0, "Injected web rollout failure unexpectedly succeeded")
+        # Even an explicit subsequent client-only apply must not route newly
+        # registered backends through the relay's previous public access policy.
+        self.deploy(revised, limit="frp_clients")
+        self.remote("client", "systemctl restart frp-tunnel-client")
+        self.closed(443)
+        if self.args.local:
+            # Inventory aliases share a token file on this one-VM fixture.
+            # Restart from the restored token rather than retaining its cache.
+            self.remote("client", "systemctl stop frp-tunnel-client")
+        self.deploy()
+        eventually(lambda: self.http("public"), "Web ingress did not recover after the failed rollout")
+        self.mark("failed relay web rollout cannot publish a new revision under the old access policy")
+
     def cutover(self):
         basic = next(service for service in self.services if service["name"] == "basic")
         oidc = next(service for service in self.services if service["name"] == "oidc")
@@ -726,6 +748,7 @@ print(json.dumps(result,sort_keys=True))
             self.browser()
             self.faults()
             self.validation()
+            self.failed_web_rollout()
             self.cutover()
             self.removal()
             if self.args.keep_fixtures:

@@ -125,7 +125,45 @@
     creates: "{{ frp_binary_dir }}/frpc"
 
 # Persist only the revision-bound credential, never the private base secret.
-# Its change restarts FRP before the relay installs any new ingress policy.
+# Quiesce owned relay processes before changing it: a failed web rollout must
+# never leave the old access policy serving newly authorized registrations.
+- name: Preview the revision-bound authentication token change
+  ansible.builtin.copy:
+    content: "{{ frp_token | frp_revision_token(frp_services_normalized, frp_oidc | default(none)) }}\n"
+    dest: /etc/frp-tunnel/token
+    owner: "{{ frp_service_user }}"
+    group: "{{ frp_service_user }}"
+    mode: "0600"
+  check_mode: true
+  register: frp_token_update
+  no_log: true
+  diff: false
+
+- name: Quiesce an owned relay before changing its revision
+  when:
+    - inventory_hostname in groups.get('frp_servers', [])
+    - frp_marker.stat.exists
+    - frp_token_update.changed
+  block:
+    - name: Inspect existing services
+      ansible.builtin.service_facts:
+
+    - name: Inspect existing web ownership
+      ansible.builtin.stat:
+        path: /etc/frp-tunnel/web/.managed
+      register: frp_old_web_marker
+
+    - name: Stop old ingress before accepting the new revision
+      ansible.builtin.systemd_service:
+        name: "{{ item }}"
+        state: stopped
+      loop:
+        - frp-tunnel-web.service
+        - frp-tunnel-server.service
+      when:
+        - item in ansible_facts.services
+        - item != 'frp-tunnel-web.service' or frp_old_web_marker.stat.exists
+
 - name: Install the private revision-bound authentication token
   ansible.builtin.copy:
     content: "{{ frp_token | frp_revision_token(frp_services_normalized, frp_oidc | default(none)) }}\n"
