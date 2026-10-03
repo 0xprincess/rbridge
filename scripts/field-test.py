@@ -459,7 +459,7 @@ class Suite:
                         require(headers.get("x-auth-request-email") == "allowed@example.test",
                                 "OIDC did not propagate verified identity")
                         cookies = context.cookies()
-                        require(any(c["name"].startswith("__Host-") and c["secure"] and c["httpOnly"]
+                        require(any(c["name"] == "__Host-frp-oidc" and c["secure"] and c["httpOnly"]
                                     and c["sameSite"] == "Lax" for c in cookies), "OIDC cookie security flags missing")
                     else:
                         require("frp-field-origin" not in body, "Unauthorized OIDC identity reached backend")
