@@ -2,14 +2,19 @@
 """Create private deployment inputs outside a Git checkout (Linux/WSL only)."""
 
 import argparse
-import json
+import importlib.util
 import os
 from pathlib import Path
 import re
 import secrets
 import shutil
 import subprocess
-import sys
+
+import yaml
+
+spec = importlib.util.spec_from_file_location("tunnel_cli", Path(__file__).with_name("tunnel.py"))
+tunnel = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tunnel)
 
 
 def validate_destination(path):
@@ -49,38 +54,52 @@ def pinned_hosts(text, host, port):
 def generate(args):
     destination = validate_destination(args.output)
     host = validate_host(args.server_host)
-    if not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}", args.client_user) or args.client_user == "root":
-        raise ValueError("Client login must be an existing non-root Linux account.")
+    managed = not args.no_managed_ssh
+    if managed and (not args.client_user or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}", args.client_user) or args.client_user == "root"):
+        raise ValueError("Managed SSH requires --client-user naming an existing non-root Linux account.")
     if not 1 <= args.relay_port <= 65535:
         raise ValueError("Invalid relay SSH port.")
     known_hosts = pinned_hosts(Path(args.known_hosts).read_text(), host, args.relay_port)
+    configuration = tunnel.load_config([args.services_file]) if args.services_file else {}
+    if not args.services_file:
+        if not managed:
+            raise ValueError("--no-managed-ssh requires --services-file with explicit frp_services.")
+        configuration["frp_services"] = [{
+            "name": "ssh", "protocol": "tcp", "backend": "127.0.0.1:2222",
+            "relay_port": 12222, "public_port": 2222,
+        }]
+    configuration.update(frp_server_address=host, frp_relay_ssh_port=args.relay_port,
+                         frp_managed_ssh=managed)
+    if managed:
+        configuration["frp_login_user"] = args.client_user
+    tunnel.validate_config(configuration)
     keygen = shutil.which("ssh-keygen")
     if not keygen:
         raise ValueError("Install OpenSSH client tools first.")
     os.umask(0o077)
     destination.mkdir(mode=0o700, parents=True)
     destination.chmod(0o700)
-    for name in ("relay", "login"):
+    for name in (("relay", "login") if managed else ("relay",)):
         subprocess.run(
             [keygen, "-q", "-t", "ed25519", "-N", "", "-C", f"frp-tunnel {name}",
              "-f", str(destination / f"{name}_id_ed25519")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )
-    # JSON strings are valid YAML scalars and cannot inject additional YAML keys.
+    # These files remain private, but ordinary block YAML makes services easy to edit.
     values = {
         "frp_token": secrets.token_hex(32),
+        "frp_admin_password": secrets.token_hex(32),
         "frp_relay_public_key": (destination / "relay_id_ed25519.pub").read_text().strip(),
         "frp_relay_private_key": (destination / "relay_id_ed25519").read_text(),
-        "frp_login_public_key": (destination / "login_id_ed25519.pub").read_text().strip(),
         "frp_relay_known_hosts": known_hosts,
     }
-    (destination / "secrets.yml").write_text(
-        "---\n" + "".join(f"{name}: {json.dumps(value)}\n" for name, value in values.items())
-    )
+    if managed:
+        values["frp_login_public_key"] = (destination / "login_id_ed25519.pub").read_text().strip()
+    (destination / "secrets.yml").write_text(yaml.safe_dump(values, sort_keys=False))
+    (destination / "services.yml").write_text(yaml.safe_dump(configuration, sort_keys=False))
     inventory = {
         "all": {
-            "vars": {"frp_server_address": host, "frp_relay_ssh_port": args.relay_port,
-                     "frp_login_user": args.client_user},
+            "vars": {"frp_server_address": host, "frp_relay_ssh_port": args.relay_port},
             "children": {
                 "frp_servers": {"hosts": {"relay": {"ansible_host": host,
                                                     "ansible_user": args.admin_user}}},
@@ -89,18 +108,28 @@ def generate(args):
             },
         }
     }
-    (destination / "inventory.yml").write_text(json.dumps(inventory, indent=2) + "\n")
+    (destination / "inventory.yml").write_text(yaml.safe_dump(inventory, sort_keys=False))
     (destination / "known_hosts").write_text(known_hosts)
     for child in destination.iterdir():
         child.chmod(0o600)
     print("Private deployment inputs created. No key or token values were printed.")
+    print("Edit services.yml, then deploy using -i inventory.yml -e @services.yml -e @secrets.yml.")
 
 
 def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--output", required=True)
-    parser.add_argument("--server-host", required=True)
-    parser.add_argument("--client-user", required=True)
+    parser = argparse.ArgumentParser(description=__doc__, epilog=(
+        "Requires Python 3.11+, PyYAML and OpenSSH. Run from the repository: "
+        "python3 scripts/create-secrets.py --output /private/tunnel --server-host relay.example.invalid "
+        "--known-hosts /private/known_hosts --client-user developer. "
+        "For non-SSH publishing add --no-managed-ssh --services-file /private/services.yml. "
+        "The service file is a flat YAML mapping containing frp_services, and frp_oidc when needed. "
+        "Validate edits with python3 scripts/tunnel.py validate --config /private/tunnel/services.yml. "
+        "Never commit generated files; use all three generated YAML files when deploying."))
+    parser.add_argument("--output", required=True, help="New private directory outside every Git checkout")
+    parser.add_argument("--server-host", required=True, help="Relay IPv4 address or DNS name")
+    parser.add_argument("--client-user", help="Existing non-root client login account; required with managed SSH")
+    parser.add_argument("--no-managed-ssh", action="store_true", help="Do not generate login keys or manage a dedicated SSH backend")
+    parser.add_argument("--services-file", help="Private flat YAML service variables to validate and copy; default is the SSH preset")
     parser.add_argument("--known-hosts", required=True,
                         help="Previously verified, unhashed Ed25519 relay host keys")
     parser.add_argument("--relay-port", type=int, default=22)
