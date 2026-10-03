@@ -86,6 +86,32 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tunnel.validate_config(value)
 
+    def test_infrastructure_port_boundaries_match_preflight(self):
+        for field in tunnel.PORT_DEFAULTS:
+            minimum = 1 if field == "frp_relay_ssh_port" else 1024
+            for port in (minimum, 65535):
+                with self.subTest(field=field, port=port):
+                    value = config()
+                    value.update(frp_managed_ssh=True)
+                    value[field] = port
+                    self.assertEqual(len(tunnel.validate_config(value)), 1)
+            for port in (minimum - 1, 65536, True, 1024.0, "private-invalid-port", None):
+                with self.subTest(field=field, port=port):
+                    value = config()
+                    value.update(frp_managed_ssh=True)
+                    value[field] = port
+                    with self.assertRaises(ValueError) as caught:
+                        tunnel.validate_config(value)
+                    self.assertIn(field, str(caught.exception))
+                    self.assertNotIn("private-invalid-port", str(caught.exception))
+
+    def test_disabled_managed_ssh_ignores_unused_backend_setting(self):
+        for port in (None, False, 0, 1023, 65536, "unused-private-setting", {"unused": []}):
+            with self.subTest(port=port):
+                value = config()
+                value["frp_backend_ssh_port"] = port
+                self.assertEqual(len(tunnel.validate_config(value)), 1)
+
     def test_yaml_errors_do_not_expose_source(self):
         private = "private-content-not-for-diagnostics"
         with tempfile.TemporaryDirectory() as folder:
@@ -150,6 +176,23 @@ class HTTPTests(unittest.TestCase):
             with self.subTest(code=code), http_server(code) as (port, _):
                 result = tunnel.endpoint_check({"kind": "http", "host": "127.0.0.1", "port": port}, "backend", 1, 2)
                 self.assertEqual(result["status"], expected)
+
+    def test_public_ingress_rejects_application_auth_responses(self):
+        policies = (("public_ingress", "public", False),
+                    ("public_ingress", "application", True),
+                    ("backend", None, True))
+        for code in (200, 302, 401, 403, 503):
+            with http_server(code, headers={"WWW-Authenticate": 'Basic realm="test"',
+                                            "Location": "/login"}) as (port, requests):
+                for stage, access, accepts_auth in policies:
+                    with self.subTest(code=code, stage=stage, access=access):
+                        result = tunnel.endpoint_check({"kind": "http", "host": "127.0.0.1", "port": port},
+                                                       stage, 1, 2, access)
+                        expected = code in (200, 302) or (code in (401, 403) and accepts_auth)
+                        self.assertEqual(result["status"], "ok" if expected else "fail")
+                        if not expected:
+                            self.assertTrue(result["action"])
+                self.assertEqual(len(requests), len(policies))
 
     def test_no_redirect_following_or_environment_proxy(self):
         with http_server(302, headers={"Location": "http://redirect.example.invalid/"}) as (port, requests):
@@ -216,6 +259,52 @@ class DoctorTests(unittest.TestCase):
     def test_server_online_status_uses_server_api_shape(self):
         result = self.diagnose([{"code": 200, "body": {"proxies": [{"name": "app", "status": "online"}]}}, {"code": 200}, {"code": 200}], role="server")
         self.assertTrue(result["ok"])
+
+    def test_real_tcp_doctor_distinguishes_relay_accept_from_origin_connectivity(self):
+        cases = (("server", True, True, "unknown"),
+                 ("server", True, False, "unknown"),
+                 ("server", False, True, "fail"),
+                 ("client", True, True, "ok"),
+                 ("client", True, False, "fail"))
+        for role, relay_listening, origin_listening, expected in cases:
+            with self.subTest(role=role, relay=relay_listening, origin=origin_listening):
+                # A bound, non-listening socket reserves a reliably unreachable port.
+                # Relay/public listeners deliberately do not forward to the origin.
+                with socket.socket() as relay, socket.socket() as origin, socket.socket() as public:
+                    for listener, listening in ((relay, relay_listening), (origin, origin_listening), (public, True)):
+                        listener.bind(("127.0.0.1", 0))
+                        if listening:
+                            listener.listen()
+                    body = json.dumps({"tcp": [{"name": "private-service", "status": "running"}],
+                                       "proxies": [{"name": "private-service", "status": "online"}]}).encode()
+                    with http_server(body=body) as (admin_port, requests), tempfile.TemporaryDirectory() as folder:
+                        value = {"frp_managed_ssh": False, "frp_server_address": "127.0.0.1",
+                                 "frp_services": [{"name": "private-service", "protocol": "tcp",
+                                                   "backend": "127.0.0.1:" + str(origin.getsockname()[1]),
+                                                   "relay_port": relay.getsockname()[1],
+                                                   "public_port": public.getsockname()[1]}]}
+                        path = Path(folder) / "services.yml"
+                        path.write_text(yaml.safe_dump(value))
+                        admin_path = Path(folder) / "frp.toml"
+                        admin_path.write_text('[webServer]\naddr = "127.0.0.1"\nport = ' + str(admin_port) +
+                                              '\nuser = "operator"\npassword = "private-test-value"\n')
+                        output = io.StringIO()
+                        with patch.object(tunnel, "transport_state", return_value="active"), redirect_stdout(output):
+                            status = tunnel.main(["doctor", "--config", str(path), "--role", role,
+                                                  "--frp-config", str(admin_path), "--timeout", "2", "--json"])
+                        result = json.loads(output.getvalue())
+                        self.assertEqual(status, 0 if expected == "ok" else 1)
+                        self.assertEqual(result["ok"], expected == "ok")
+                        self.assertEqual([entry["status"] for entry in result["checks"]], ["ok", "ok", expected, "ok"])
+                        backend = result["checks"][2]
+                        if expected == "unknown":
+                            self.assertIn("unproven", backend["message"])
+                            self.assertIn("--role client", backend["action"])
+                            self.assertIn("protocol-specific", backend["action"])
+                        self.assertIn("not an application-protocol health check", result["checks"][3]["message"])
+                        self.assertEqual(requests[0][0], "/api/status" if role == "client" else "/api/proxy/tcp")
+                        for private in ("private-service", "private-test-value", "127.0.0.1", folder):
+                            self.assertNotIn(private, output.getvalue())
 
     def test_private_api_errors_and_endpoint_values_are_not_printed(self):
         private = "sensitive-backend-error"
