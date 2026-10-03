@@ -1,0 +1,28 @@
+[Unit]
+Description=frp-tunnel OIDC authorization for {{ app.name }}
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=true
+LoadCredential=oauth2.cfg:/etc/frp-tunnel/web/oidc-{{ app.name }}/oauth2.cfg
+ExecStartPre={{ frp_web_oauth2_binary }} --config=%d/oauth2.cfg --config-test
+ExecStart={{ frp_web_oauth2_binary }} --config=%d/oauth2.cfg
+Restart=on-failure
+RestartSec=5s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

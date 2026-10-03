@@ -1,0 +1,20 @@
+---
+# Production uses public ACME. Internal is only for explicitly trusted test/private CAs.
+frp_web_tls: acme
+frp_web_acme_email: ""
+frp_web_acme_ca: ""
+
+# Upstream release checksums, not dynamically fetched trust metadata.
+# https://github.com/caddyserver/caddy/releases/tag/v2.11.7
+frp_web_caddy_version: "2.11.7"
+frp_web_caddy_checksums:
+  amd64: "sha512:a7a433a1b133efc3c8d10eb0b99d52a24b5ef5c322dc77f5282182b1c0402139ab83f3a99f0c52409df77d20123fb0b523edad8a66d8f5e49136197bf61ef0e7"
+  arm64: "sha512:3db36ba90c7a6e8dda40ee3dd71fa08844c76b5fb08f61b31e5e78d2ed38e71c51dc7baed875e50d1ca1279196e84302967237386ae87c91ae9f2aaceada682e"
+# https://github.com/oauth2-proxy/oauth2-proxy/releases/tag/v7.15.5
+frp_web_oauth2_version: "7.15.5"
+frp_web_oauth2_checksums:
+  amd64: "sha256:f63f94bf72c5f46ab002a0a275aa8b3cf19b4d828aed08a13978cb9a62c3a1fd"
+  arm64: "sha256:ebef73d06a05f76a03b0b2f95aa8424c10201228bd64621a2a7d375ce44dd637"
+frp_web_architectures:
+  x86_64: amd64
+  aarch64: arm64

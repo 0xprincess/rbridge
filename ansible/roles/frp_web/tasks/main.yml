@@ -1,0 +1,34 @@
+---
+- name: Select validated web services
+  ansible.builtin.set_fact:
+    frp_web_apps: "{{ frp_services_normalized | selectattr('protocol', 'equalto', 'http') | list }}"
+  no_log: true
+
+- name: Select OIDC applications
+  ansible.builtin.set_fact:
+    frp_web_oidc_apps: "{{ frp_web_apps | selectattr('access.mode', 'equalto', 'oidc') | list }}"
+  no_log: true
+
+- name: Inspect dedicated web ownership marker
+  ansible.builtin.stat:
+    path: /etc/frp-tunnel/web/.managed
+  register: frp_web_marker
+
+- name: Validate web release and certificate settings
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['architecture'] in frp_web_architectures
+      - frp_web_tls in ['acme', 'internal']
+      - frp_web_caddy_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - frp_web_oauth2_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - frp_web_caddy_checksums[frp_web_architectures[ansible_facts['architecture']]] is match('^sha512:[a-f0-9]{128}$')
+      - frp_web_oauth2_checksums[frp_web_architectures[ansible_facts['architecture']]] is match('^sha256:[a-f0-9]{64}$')
+      - frp_web_acme_email == '' or frp_web_acme_email is match('^[A-Za-z0-9_.+@-]+$')
+      - frp_web_acme_ca == '' or frp_web_acme_ca is match('^https://[A-Za-z0-9._:/-]+$')
+    fail_msg: Invalid web release or certificate settings.
+  when: frp_web_apps | length > 0
+
+# A fresh TCP-only deployment installs no web binaries, account or services.
+- name: Manage requested or previously owned web publishing
+  ansible.builtin.include_tasks: managed.yml
+  when: frp_web_apps | length > 0 or frp_web_marker.stat.exists

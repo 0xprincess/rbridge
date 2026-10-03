@@ -1,0 +1,55 @@
+# Per-host authorization; no token or Authorization header reaches the app.
+provider = "oidc"
+oidc_issuer_url = {{ frp_oidc.issuer_url | to_json }}
+client_id = {{ frp_oidc.client_id | to_json }}
+client_secret = {{ frp_oidc.client_secret | to_json }}
+cookie_secret = {{ frp_oidc.cookie_secret | to_json }}
+http_address = "127.0.0.1:{{ app.access.port }}"
+reverse_proxy = true
+trusted_proxy_ips = ["127.0.0.1/32"]
+real_client_ip_header = "X-Real-IP"
+redirect_url = "https://{{ app.hostname }}/oauth2/callback"
+whitelist_domains = [{{ app.hostname | to_json }}]
+proxy_prefix = "/oauth2"
+scope = "openid email profile"
+code_challenge_method = "S256"
+insecure_oidc_skip_nonce = false
+insecure_oidc_allow_unverified_email = false
+insecure_oidc_skip_issuer_verification = false
+ssl_insecure_skip_verify = false
+email_domains = {{ app.access.allowed_domains | default([]) | to_json }}
+{% if app.access.allowed_emails | default([]) | length %}
+authenticated_emails_file = "/etc/frp-tunnel/web/oidc-{{ app.name }}/emails"
+{% endif %}
+# Auth-only static upstream is never an application route. Caddy proxies the
+# actual request only after /oauth2/auth returns success.
+upstreams = ["static://202"]
+set_xauthrequest = true
+set_authorization_header = false
+pass_authorization_header = false
+pass_access_token = false
+pass_basic_auth = false
+pass_user_headers = false
+skip_auth_strip_headers = true
+skip_jwt_bearer_tokens = false
+skip_auth_preflight = false
+skip_provider_button = true
+cookie_name = "__Host-frp-{{ app.name }}"
+cookie_path = "/"
+cookie_secure = true
+cookie_httponly = true
+cookie_samesite = "lax"
+cookie_expire = "1h"
+# Bounded sessions deliberately require a fresh provider login after expiry.
+# Tokens are never retained in browser cookies or sent to an application.
+cookie_refresh = "0s"
+session_cookie_minimal = true
+cookie_csrf_per_request = true
+cookie_csrf_per_request_limit = 8
+cookie_csrf_expire = "10m"
+# Callback URLs carry codes/state. Do not write request URLs or user identities
+# into logs; errors remain available in the service journal.
+request_logging = false
+auth_logging = false
+standard_logging = true
+show_debug_on_error = false

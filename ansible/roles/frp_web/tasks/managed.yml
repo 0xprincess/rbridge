@@ -1,0 +1,113 @@
+---
+- name: Inspect dedicated web resources before adoption
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - /etc/frp-tunnel/web
+    - /var/lib/frp-tunnel-web
+    - /etc/systemd/system/frp-tunnel-web.service
+  register: frp_web_resources
+
+- name: Refuse to adopt unrelated web resources
+  ansible.builtin.assert:
+    that:
+      - frp_web_marker.stat.exists or not item.stat.exists
+    fail_msg: Dedicated frp-tunnel web resources already exist without their ownership marker.
+  loop: "{{ frp_web_resources.results }}"
+
+- name: Inspect existing dedicated web account
+  ansible.builtin.getent:
+    database: passwd
+    key: frp-tunnel-web
+    fail_key: false
+
+- name: Refuse to adopt an unrelated web account
+  ansible.builtin.assert:
+    that:
+      - frp_web_marker.stat.exists or ansible_facts.getent_passwd['frp-tunnel-web'] is none
+    fail_msg: The dedicated frp-tunnel-web account is already in use.
+
+- name: Discover previously generated OIDC units
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns: frp-tunnel-oidc-*.service
+    file_type: file
+  register: frp_web_existing_oidc_units
+
+- name: Refuse to adopt unmarked OIDC units
+  ansible.builtin.assert:
+    that:
+      - frp_web_marker.stat.exists or frp_web_existing_oidc_units.matched == 0
+    fail_msg: Dedicated OIDC unit names exist without the web ownership marker.
+
+- name: Determine the desired OIDC units
+  ansible.builtin.set_fact:
+    frp_web_desired_oidc_units: "{{ frp_web_oidc_apps | map(attribute='name') | map('regex_replace', '^(.*)$', 'frp-tunnel-oidc-\\1.service') | list }}"
+  no_log: true
+
+- name: Stop obsolete OIDC listeners before deleting configuration
+  ansible.builtin.systemd_service:
+    name: "{{ item.path | basename }}"
+    enabled: false
+    state: stopped
+  loop: "{{ frp_web_existing_oidc_units.files }}"
+  when: item.path | basename not in frp_web_desired_oidc_units
+
+- name: Install and configure requested web applications
+  ansible.builtin.include_tasks: install.yml
+  when: frp_web_apps | length > 0
+
+- name: Remove obsolete OIDC units
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ frp_web_existing_oidc_units.files }}"
+  when: item.path | basename not in frp_web_desired_oidc_units
+  register: frp_web_removed_oidc_units
+
+- name: Discover owned OIDC configuration directories
+  ansible.builtin.find:
+    paths: /etc/frp-tunnel/web
+    patterns: oidc-*
+    file_type: directory
+  register: frp_web_existing_oidc_configs
+
+- name: Remove obsolete OIDC secrets and allowlists
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ frp_web_existing_oidc_configs.files }}"
+  when: (item.path | basename | regex_replace('^oidc-', '')) not in (frp_web_oidc_apps | map(attribute='name') | list)
+  no_log: true
+
+- name: Inspect dedicated Caddy unit for web removal
+  ansible.builtin.stat:
+    path: /etc/systemd/system/frp-tunnel-web.service
+  register: frp_web_owned_unit
+  when: frp_web_apps | length == 0
+
+- name: Stop HTTPS ingress when the last web application is removed
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-web.service
+    enabled: false
+    state: stopped
+  when:
+    - frp_web_apps | length == 0
+    - frp_web_owned_unit.stat.exists
+
+- name: Remove obsolete HTTPS ingress configuration
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/frp-tunnel-web.service
+    - /etc/frp-tunnel/web/Caddyfile
+  when: frp_web_apps | length == 0
+  register: frp_web_removed_caddy
+
+# Retain the marker/account/certificate storage so re-adding HTTPS neither
+# adopts an unrelated account nor unnecessarily reissues certificates.
+- name: Reload systemd after removing generated units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: frp_web_removed_oidc_units.changed or frp_web_removed_caddy.changed
