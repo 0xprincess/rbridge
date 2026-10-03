@@ -1,0 +1,3 @@
+# Install alongside the repository's requirements-dev.txt for real field tests.
+bcrypt==4.3.0
+playwright==1.55.1

@@ -3,14 +3,14 @@
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
 import pwd
-import re
-import shutil
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 
@@ -30,10 +30,10 @@ def run(args, **kwargs):
     return result
 
 
-def ports():
+def ports(count=9):
     sockets = []
     try:
-        for _ in range(4):
+        for _ in range(count):
             sock = socket.socket()
             sock.bind(("127.0.0.1", 0))
             sockets.append(sock)
@@ -57,6 +57,7 @@ def wait_port(port, timeout=35):
 def render(role, name, values):
     environment = Environment(loader=FileSystemLoader(ROOT / f"ansible/roles/{role}/templates"),
                               undefined=StrictUndefined, keep_trailing_newline=True)
+    environment.filters["to_json"] = json.dumps
     return environment.get_template(name).render(values)
 
 
@@ -99,13 +100,25 @@ def process_test(args, folder, user, values):
     if not Path("/run/sshd").is_dir():
         raise RuntimeError("OpenSSH runtime directory /run/sshd must already exist.")
     prepare_keys(folder)
-    server_port, public_port, forward_port, backend_port = ports()
-    values.update(frp_server_port=server_port, frp_public_ssh_port=public_port,
+    (server_port, public_port, forward_port, backend_port, relay_port,
+     second_relay_port, second_public_port, client_admin_port, server_admin_port) = ports()
+    spec = importlib.util.spec_from_file_location("frp_config", ROOT / "ansible/filter_plugins/frp_config.py")
+    model = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(model)
+    services = [{"name": name, "protocol": "tcp", "backend": f"127.0.0.1:{backend_port}",
+                 "relay_port": relay, "public_port": public}
+                for name, relay, public in (("ssh", relay_port, public_port),
+                                           ("second", second_relay_port, second_public_port))]
+    values.update(frp_server_port=server_port, frp_services_normalized=model.normalize_services(services),
                   frp_forward_port=forward_port, frp_backend_ssh_port=backend_port,
-                  frp_login_user=user)
+                  frp_login_user=user, frp_client_admin_port=client_admin_port,
+                  frp_server_admin_port=server_admin_port, frp_admin_user="frp-doctor",
+                  frp_admin_password=os.urandom(32).hex())
     host_key = (folder / "host.key.pub").read_text().split()
     for filename, port in (("relay_known_hosts", backend_port), ("login_known_hosts", public_port)):
         (folder / filename).write_text(f"[127.0.0.1]:{port} {host_key[0]} {host_key[1]}\n")
+    with (folder / "login_known_hosts").open("a") as known:
+        known.write(f"[127.0.0.1]:{second_public_port} {host_key[0]} {host_key[1]}\n")
     login_pub = (folder / "login.key.pub").read_text()
     relay_pub = (folder / "relay.key.pub").read_text()
     (folder / "login_authorized_keys").write_text(
@@ -145,13 +158,22 @@ def process_test(args, folder, user, values):
         relay = start(transport)
         wait_port(forward_port)
         start([args.frpc, "-c", str(folder / "frpc.toml")])
+        proxy = next((path for path in ("/usr/lib/systemd/systemd-socket-proxyd",
+                                       "/lib/systemd/systemd-socket-proxyd") if Path(path).is_file()), None)
+        if not proxy:
+            raise RuntimeError("systemd-socket-proxyd is required for the public TCP ingress.")
+        for public, private in ((public_port, relay_port), (second_public_port, second_relay_port)):
+            wait_port(private)
+            start(["systemd-socket-activate", "-l", f"127.0.0.1:{public}", proxy, f"127.0.0.1:{private}"])
         wait_port(public_port)
         check_tunnel(folder, public_port, user)
+        check_tunnel(folder, second_public_port, user)
         relay.terminate()
         relay.wait(timeout=5)
         start(transport)
         wait_port(forward_port)
         check_tunnel(folder, public_port, user)
+        check_tunnel(folder, second_public_port, user)
         print("Transport reconnection verified with real FRP and OpenSSH processes.")
     finally:
         for child in reversed(children):
@@ -165,61 +187,6 @@ def process_test(args, folder, user, values):
         log.close()
 
 
-def deployment_test(folder, user, values):
-    # This mode intentionally provisions the project on the disposable CI VM.
-    run(["apt-get", "update", "-qq"])
-    run(["apt-get", "install", "-y", "-qq", "openssh-server"])
-    run(["systemctl", "start", "ssh"])
-    prepare_keys(folder)
-    server_port, public_port, forward_port, backend_port = ports()
-    values.update(frp_server_port=server_port, frp_public_ssh_port=public_port,
-                  frp_forward_port=forward_port, frp_backend_ssh_port=backend_port,
-                  frp_login_user=user, frp_server_address="127.0.0.1",
-                  frp_relay_ssh_port=22, frp_token=os.urandom(32).hex(),
-                  frp_relay_public_key=(folder / "relay.key.pub").read_text().strip(),
-                  frp_relay_private_key=(folder / "relay.key").read_text(),
-                  frp_login_public_key=(folder / "login.key.pub").read_text().strip())
-    host_key = Path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
-    values["frp_relay_known_hosts"] = f"127.0.0.1 {host_key[0]} {host_key[1]}\n"
-    (folder / "login_known_hosts").write_text(
-        f"[127.0.0.1]:{public_port} {host_key[0]} {host_key[1]}\n"
-    )
-    inventory = {"all": {"vars": values, "children": {
-        "frp_servers": {"hosts": {"relay": {"ansible_connection": "local"}}},
-        "frp_clients": {"hosts": {"client": {"ansible_connection": "local"}}},
-    }}}
-    (folder / "inventory.json").write_text(json.dumps(inventory))
-    environment = dict(os.environ, ANSIBLE_CONFIG=str(ROOT / "ansible/ansible.cfg"))
-    command = [shutil.which("ansible-playbook"), "-i", str(folder / "inventory.json"),
-               str(ROOT / "ansible/deploy.yml")]
-    run(command, env=environment)
-    wait_port(public_port)
-    check_tunnel(folder, public_port, user)
-    run(["systemctl", "restart", "frp-tunnel-transport"])
-    check_tunnel(folder, public_port, user)
-    second = run(command, env=environment)
-    recap = [line for line in second.stdout.decode().splitlines() if "changed=" in line]
-    assert len(recap) == 2 and all(re.search(r"changed=0\s", line) for line in recap), \
-        "Second deployment was not idempotent."
-    relay_ssh = [
-        "ssh", "-F", "/dev/null", "-i", str(folder / "relay.key"), "-o", "BatchMode=yes",
-        "-o", "StrictHostKeyChecking=yes", "-o", "IdentityAgent=none", "-o", "IdentitiesOnly=yes",
-        "-o", f"UserKnownHostsFile={folder / 'relay_known_hosts'}",
-        "-o", "ProxyCommand=none", "-o", "ProxyJump=none", "-o", "ConnectTimeout=5",
-    ]
-    denied = subprocess.run(relay_ssh + ["frp-relay@127.0.0.1", "true"],
-                            capture_output=True, timeout=15)
-    assert denied.returncode != 0, "Relay account must not allow command execution."
-    denied = subprocess.run(relay_ssh + ["-W", "127.0.0.1:22", "frp-relay@127.0.0.1"],
-                            capture_output=True, timeout=15)
-    assert denied.returncode != 0 and b"administratively prohibited" in denied.stderr, \
-        "Relay key must reject unrelated local forwarding destinations."
-    denied = subprocess.run(relay_ssh + ["-NT", "-o", "ExitOnForwardFailure=yes", "-R",
-                                        f"127.0.0.1:0:127.0.0.1:{server_port}",
-                                        "frp-relay@127.0.0.1"], capture_output=True, timeout=15)
-    assert denied.returncode != 0 and b"remote port forwarding failed" in denied.stderr, \
-        "Relay account must reject remote forwarding."
-    print("Actual Ansible deployment, restart recovery, relay restriction, and idempotence verified.")
 
 
 def main():
@@ -237,19 +204,16 @@ def main():
     os.umask(0o077)
     for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
         os.environ.pop(name, None)
+    if args.apply_to_disposable_host:
+        result = subprocess.run([sys.executable, str(ROOT / "scripts/field-test.py"),
+                                 "--local", "--user", args.user], check=False)
+        raise SystemExit(result.returncode)
     # OpenSSH StrictModes rejects authorized keys below world-writable /tmp.
     with tempfile.TemporaryDirectory(prefix="frp-tunnel-test-", dir="/run") as temporary:
         folder = Path(temporary)
         folder.chmod(0o755)  # sshd reads the public authorized key as the login user.
         values = {"frp_service_user": "frp-tunnel", "frp_relay_user": "frp-relay"}
-        if args.apply_to_disposable_host:
-            # Trust is pinned from the local disposable VM, never fetched from a network peer.
-            run(["apt-get", "install", "-y", "-qq", "openssh-server"])
-            host = Path("/etc/ssh/ssh_host_ed25519_key.pub").read_text().split()
-            (folder / "relay_known_hosts").write_text(f"127.0.0.1 {host[0]} {host[1]}\n")
-            deployment_test(folder, args.user, values)
-        else:
-            process_test(args, folder, args.user, values)
+        process_test(args, folder, args.user, values)
 
 
 if __name__ == "__main__":

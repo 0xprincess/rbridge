@@ -29,6 +29,7 @@ jobs:
           DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           DEPLOY_INVENTORY: ${{ secrets.DEPLOY_INVENTORY }}
+          TUNNEL_SERVICES: ${{ secrets.TUNNEL_SERVICES }}
           TUNNEL_SECRETS: ${{ secrets.TUNNEL_SECRETS }}
         run: python scripts/prepare-ci-deployment.py
       - name: Apply only the remote relay role
@@ -38,6 +39,7 @@ jobs:
           export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/frp-tunnel/known_hosts -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
           ansible-playbook \
             -i "$RUNNER_TEMP/frp-tunnel/inventory.yml" \
+            -e "@$RUNNER_TEMP/frp-tunnel/services.yml" \
             -e "@$RUNNER_TEMP/frp-tunnel/secrets.yml" \
             --private-key "$RUNNER_TEMP/frp-tunnel/admin.key" \
             --limit frp_servers ansible/deploy.yml
