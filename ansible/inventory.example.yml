@@ -3,7 +3,20 @@ all:
   vars:
     frp_server_address: relay.example.invalid
     frp_relay_ssh_port: 22
-    frp_public_ssh_port: 2222
+    frp_managed_ssh: true
+    frp_services:
+      - name: ssh
+        protocol: tcp
+        backend: 127.0.0.1:2222
+        relay_port: 12222
+        public_port: 2222
+      - name: app
+        protocol: http
+        backend: http://127.0.0.1:8080
+        relay_port: 18080
+        hostname: app.example.invalid
+        access:
+          mode: application
     frp_backend_ssh_port: 2222
     frp_login_user: developer
   children:

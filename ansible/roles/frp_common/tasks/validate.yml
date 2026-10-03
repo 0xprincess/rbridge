@@ -1,0 +1,114 @@
+---
+- name: Validate the supported platform and private configuration
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_major_version'] | int >= 24
+      - ansible_facts['service_mgr'] == 'systemd'
+      - ansible_facts['architecture'] in frp_architectures
+      - frp_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - frp_version in frp_checksums
+      - frp_checksums[frp_version][frp_architectures[ansible_facts['architecture']]] is match('^[a-f0-9]{64}$')
+      - frp_service_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_relay_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_service_user != frp_relay_user
+      - frp_service_user not in ['root', 'nobody']
+      - frp_relay_user not in ['root', 'nobody']
+      - frp_token is defined
+      - frp_token is match('^[a-f0-9]{64}$')
+      - frp_admin_user is match('^[a-zA-Z0-9_-]{1,64}$')
+      - frp_admin_password is defined
+      - frp_admin_password is match('^[a-f0-9]{64}$')
+      - frp_managed_ssh is boolean
+    fail_msg: Unsupported platform or invalid private account/token/admin configuration.
+  no_log: true
+
+- name: Validate listener port types and ranges
+  ansible.builtin.assert:
+    that:
+      - item.value is integer
+      - item.value >= item.minimum
+      - item.value <= 65535
+    fail_msg: "{{ item.field }} must be an integer in the supported TCP port range."
+  loop:
+    - { field: frp_server_port, value: "{{ frp_server_port }}", minimum: 1024 }
+    - { field: frp_relay_ssh_port, value: "{{ frp_relay_ssh_port }}", minimum: 1 }
+    - { field: frp_server_admin_port, value: "{{ frp_server_admin_port }}", minimum: 1024 }
+    - { field: frp_forward_port, value: "{{ frp_forward_port }}", minimum: 1024 }
+    - { field: frp_client_admin_port, value: "{{ frp_client_admin_port }}", minimum: 1024 }
+  loop_control:
+    label: "{{ item.field }}"
+
+- name: Require distinct infrastructure listeners on each machine
+  ansible.builtin.assert:
+    that:
+      - ([frp_server_port, frp_relay_ssh_port, frp_server_admin_port, 80, 443] | unique | length) == 5
+      - frp_forward_port != frp_client_admin_port
+    fail_msg: Relay infrastructure listeners or client control/admin listeners collide.
+
+- name: Validate the service model without exposing credentials
+  ansible.builtin.assert:
+    that:
+      - frp_service_validation_error == ''
+    fail_msg: "{{ frp_service_validation_error }}"
+  vars:
+    frp_service_validation_error: "{{ frp_services | frp_service_error([frp_server_port, frp_relay_ssh_port, frp_server_admin_port, 80, 443], frp_oidc | default(none)) }}"
+
+- name: Normalize the validated service model
+  ansible.builtin.set_fact:
+    frp_services_normalized: "{{ frp_services | frp_normalize_services([frp_server_port, frp_relay_ssh_port, frp_server_admin_port, 80, 443], frp_oidc | default(none)) }}"
+  no_log: true
+
+- name: Validate the managed SSH listener when enabled
+  ansible.builtin.assert:
+    that:
+      - frp_backend_ssh_port is integer
+      - frp_backend_ssh_port >= 1024 and frp_backend_ssh_port <= 65535
+      - frp_backend_ssh_port not in [frp_forward_port, frp_client_admin_port]
+    fail_msg: frp_backend_ssh_port must be a distinct high client listener port.
+  when: frp_managed_ssh
+
+- name: Validate server identity before making changes
+  ansible.builtin.assert:
+    that:
+      - frp_relay_public_key is defined
+      - "frp_relay_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: [^\\r\\n]*)?$')"
+    fail_msg: A generated relay public key is required.
+  when: "'frp_servers' in group_names"
+  no_log: true
+
+- name: Validate client transport identity before making changes
+  ansible.builtin.assert:
+    that:
+      - frp_server_address is defined
+      - frp_server_address is match('^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$')
+      - frp_relay_private_key is defined
+      - frp_relay_private_key | trim | length > 0
+      - frp_relay_known_hosts is defined
+      - frp_relay_known_hosts | trim | length > 0
+    fail_msg: Valid client transport identity, address, and verified host keys are required.
+  when: "'frp_clients' in group_names"
+  no_log: true
+
+- name: Validate optional managed SSH login identity
+  ansible.builtin.assert:
+    that:
+      - frp_login_user is defined
+      - frp_login_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_login_user not in ['root', frp_service_user, frp_relay_user]
+      - frp_login_public_key is defined
+      - "frp_login_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: [^\\r\\n]*)?$')"
+    fail_msg: Managed SSH requires an existing non-root login account and an Ed25519 public key.
+  when:
+    - "'frp_clients' in group_names"
+    - frp_managed_ssh
+  no_log: true
+
+- name: Require the optional managed SSH login account to exist
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ frp_login_user }}"
+  when:
+    - "'frp_clients' in group_names"
+    - frp_managed_ssh
+  no_log: true

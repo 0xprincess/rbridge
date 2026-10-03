@@ -11,6 +11,15 @@ frp_service_user: frp-tunnel
 frp_relay_user: frp-relay
 frp_server_port: 7000
 frp_forward_port: 17001
-frp_public_ssh_port: 2222
+frp_managed_ssh: true
+frp_services:
+  - name: ssh
+    protocol: tcp
+    backend: "127.0.0.1:{{ frp_backend_ssh_port }}"
+    relay_port: 12222
+    public_port: 2222
+frp_admin_user: frp-doctor
+frp_client_admin_port: 17400
+frp_server_admin_port: 17401
 frp_backend_ssh_port: 2222
 frp_relay_ssh_port: 22
