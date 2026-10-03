@@ -1,0 +1,118 @@
+# Owned exclusively by frp-tunnel; never imports /etc/caddy configuration.
+{
+	admin unix//run/frp-tunnel-web/admin.sock
+	persist_config off
+	skip_install_trust
+{% if frp_web_acme_email | length %}
+	email {{ frp_web_acme_email | to_json }}
+{% endif %}
+{% if frp_web_acme_ca | length %}
+	acme_ca {{ frp_web_acme_ca | to_json }}
+{% endif %}
+	servers {
+		strict_sni_host on
+		protocols h1 h2
+	}
+}
+
+{% for app in frp_web_apps %}
+https://{{ app.hostname }} {
+{% if frp_web_tls == 'internal' %}
+	tls internal
+{% endif %}
+	route {
+		# The Internet is not a trusted upstream proxy or identity provider.
+		request_header {
+			-Forwarded
+			-X-Forwarded-*
+			-X-Auth-*
+			-X-Authenticated-*
+			-X-Remote-*
+			-Remote-*
+			-X-Webauth-*
+			-X-Original-*
+			-X-Real-IP
+		}
+{% if app.access.mode == 'basic' %}
+		basic_auth bcrypt {
+{% for username, password_hash in app.access.users | dictsort %}
+			{{ username | to_json }} {{ password_hash | to_json }}
+{% endfor %}
+		}
+		request_header -Authorization
+		request_header X-Auth-Request-User {http.auth.user.id}
+{% elif app.access.mode == 'oidc' %}
+		request_header -Authorization
+		# OAuth endpoints never pass through to the application. Only this
+		# dedicated host's loopback authenticator receives callback/state.
+		handle /oauth2/* {
+			reverse_proxy 127.0.0.1:{{ app.access.port }} {
+				header_up Host {{ app.hostname }}
+				header_up X-Forwarded-Host {{ app.hostname }}
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Real-IP {remote_host}
+				header_up X-Auth-Request-Redirect https://{{ app.hostname }}/
+			}
+		}
+		handle {
+			# Expanded forward_auth: GET preserves the original request body.
+			# Only a 2xx auth response continues to the FRP backend.
+			reverse_proxy 127.0.0.1:{{ app.access.port }} {
+				method GET
+				rewrite /oauth2/auth
+				header_up Host {{ app.hostname }}
+				header_up X-Forwarded-Host {{ app.hostname }}
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Real-IP {remote_host}
+				header_up X-Forwarded-Method {method}
+				header_up X-Forwarded-Uri {uri}
+				@authenticated status 2xx
+				handle_response @authenticated {
+					request_header X-Auth-Request-User {rp.header.X-Auth-Request-User}
+					request_header X-Auth-Request-Email {rp.header.X-Auth-Request-Email}
+					copy_response_headers {
+						include Set-Cookie
+					}
+				}
+				@unauthenticated status 401
+				handle_response @unauthenticated {
+					# Start login internally: no unescaped rd query and no
+					# client-controlled redirect host. Callback restores URI.
+					reverse_proxy 127.0.0.1:{{ app.access.port }} {
+						method GET
+						rewrite /oauth2/start
+						header_up Host {{ app.hostname }}
+						header_up X-Forwarded-Host {{ app.hostname }}
+						header_up X-Forwarded-Proto https
+						header_up X-Forwarded-For {remote_host}
+						header_up X-Real-IP {remote_host}
+						header_up X-Auth-Request-Redirect https://{{ app.hostname }}{http.request.orig_uri}
+					}
+				}
+			}
+{% endif %}
+			# Caddy natively upgrades WebSockets; immediate flushing also
+			# supports SSE/chunked streams without buffering application data.
+			reverse_proxy {{ app.backend_scheme }}://127.0.0.1:{{ app.relay_port }} {
+				flush_interval -1
+				header_up Host {{ app.hostname }}
+				header_up X-Forwarded-Host {{ app.hostname }}
+				header_up X-Forwarded-Proto https
+				header_up X-Forwarded-For {remote_host}
+				header_up X-Real-IP {remote_host}
+{% if app.backend_scheme == 'https' %}
+				transport http {
+					tls
+					tls_server_name {{ app.backend_host | to_json }}
+				}
+{% endif %}
+			}
+{% if app.access.mode == 'oidc' %}
+		}
+{% endif %}
+	}
+}
+
+{% endfor %}

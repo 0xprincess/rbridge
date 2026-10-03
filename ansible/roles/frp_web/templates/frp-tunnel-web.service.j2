@@ -1,0 +1,39 @@
+[Unit]
+Description=frp-tunnel HTTPS publishing (dedicated Caddy)
+Wants=network-online.target
+After=network-online.target frp-tunnel-server.service
+
+[Service]
+Type=notify
+User=frp-tunnel-web
+Group=frp-tunnel-web
+Environment=HOME=/var/lib/frp-tunnel-web
+Environment=XDG_DATA_HOME=/var/lib/frp-tunnel-web/data
+Environment=XDG_CONFIG_HOME=/var/lib/frp-tunnel-web/config
+RuntimeDirectory=frp-tunnel-web
+RuntimeDirectoryMode=0700
+ExecStartPre={{ frp_web_caddy_binary }} validate --config /etc/frp-tunnel/web/Caddyfile --adapter caddyfile
+ExecStart={{ frp_web_caddy_binary }} run --config /etc/frp-tunnel/web/Caddyfile --adapter caddyfile
+ExecReload={{ frp_web_caddy_binary }} validate --config /etc/frp-tunnel/web/Caddyfile --adapter caddyfile
+ExecReload={{ frp_web_caddy_binary }} reload --config /etc/frp-tunnel/web/Caddyfile --adapter caddyfile --address unix//run/frp-tunnel-web/admin.sock
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+LimitNOFILE=1048576
+UMask=0077
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/frp-tunnel-web
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
