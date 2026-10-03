@@ -121,6 +121,14 @@ as 64 lowercase hex characters. Other generated secrets are
 the user's login private key stays with the connecting user. When managed SSH is
 disabled, its unit, configuration and authorized key are removed, not native SSH.
 
+The installed FRP authentication token is derived with HMAC-SHA256 from the
+private base `frp_token` and the canonical service manifest (including access
+policies and, when used, OIDC provider configuration). It is not the base value
+itself. Both hosts must receive the same revision. Changing a mapping or policy
+revokes old registrations and connections when the relay restarts, preventing
+an old protected backend from appearing behind a newly public route during a
+partial deployment. A relay-only cutover fails closed until the client is updated.
+
 ## HTTPS and DNS
 
 Point every published hostname to the relay. Permit inbound TCP 80/443 and allow
@@ -170,7 +178,10 @@ base64 encoding of 32 random bytes). Register **each** app's exact callback
 OIDC discovery, authorization-code flow, verified email, nonce validation, and
 S256 PKCE. There is no custom identity provider or user database in this project.
 If your issuer itself is behind this tunnel, bootstrap its public route before
-enabling apps that depend on it.
+enabling apps that depend on it. Full deployment checks OIDC readiness after
+the client rollout. With `--limit frp_servers`, readiness may fail until the
+client receives the matching revision; apply both sides rather than disabling
+the readiness or authentication checks.
 
 Each app uses a separate loopback oauth2-proxy instance and host-only
 `__Host-frp-NAME` Secure/HttpOnly/SameSite=Lax session cookie. Sessions last up to
@@ -190,7 +201,8 @@ Keep administrative access and prior private inputs before deploying. Fresh
 installs require unused dedicated accounts and refuse unmarked project
 configuration. Managed account names cannot be reassigned in place. Reapplying
 identical inputs is intended to produce zero changes; runtime configuration is
-validated before replacement. Service/key changes may disconnect sessions.
+validated before replacement. Manifest/policy/key changes revoke all tunnel
+registrations and can disconnect unrelated services sharing this tunnel.
 
 For an existing `v0.1` installation:
 
