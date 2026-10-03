@@ -1,0 +1,31 @@
+---
+- name: Create the dedicated oauth2-proxy release directory
+  ansible.builtin.file:
+    path: "/usr/local/lib/frp-tunnel/oauth2-proxy-{{ frp_web_oauth2_version }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download checksum-pinned oauth2-proxy
+  ansible.builtin.get_url:
+    url: "https://github.com/oauth2-proxy/oauth2-proxy/releases/download/v{{ frp_web_oauth2_version }}/oauth2-proxy-v{{ frp_web_oauth2_version }}.linux-{{ frp_web_arch }}.tar.gz"
+    dest: "/var/cache/frp-tunnel/oauth2-proxy_{{ frp_web_oauth2_version }}_{{ frp_web_arch }}.tar.gz"
+    checksum: "{{ frp_web_oauth2_checksums[frp_web_arch] }}"
+    use_proxy: false
+    use_netrc: false
+    validate_certs: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract the verified authenticator release
+  ansible.builtin.unarchive:
+    src: "/var/cache/frp-tunnel/oauth2-proxy_{{ frp_web_oauth2_version }}_{{ frp_web_arch }}.tar.gz"
+    dest: "/usr/local/lib/frp-tunnel/oauth2-proxy-{{ frp_web_oauth2_version }}"
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+    owner: root
+    group: root
+    creates: "{{ frp_web_oauth2_binary }}"
