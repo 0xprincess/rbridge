@@ -49,15 +49,18 @@ def load_config(paths):
 
 
 def validate_config(config):
-    ports = {}
-    for key, default in PORT_DEFAULTS.items():
-        value = config.get(key, default)
-        if type(value) is not int or not 1 <= value <= 65535:
-            raise ValueError(key + " must be an integer port from 1 to 65535.")
-        ports[key] = value
     managed = config.get("frp_managed_ssh", True)
     if type(managed) is not bool:
         raise ValueError("frp_managed_ssh must be a YAML boolean.")
+    ports = {}
+    for key, default in PORT_DEFAULTS.items():
+        if key == "frp_backend_ssh_port" and not managed:
+            continue
+        value = config.get(key, default)
+        minimum = 1 if key == "frp_relay_ssh_port" else 1024
+        if type(value) is not int or not minimum <= value <= 65535:
+            raise ValueError(key + " must be an integer port from " + str(minimum) + " to 65535.")
+        ports[key] = value
     relay = [ports[key] for key in ("frp_server_port", "frp_relay_ssh_port", "frp_server_admin_port")] + [80, 443]
     if len(set(relay)) != len(relay):
         raise ValueError("Relay control, SSH, admin and web listener ports must be distinct.")
@@ -209,8 +212,9 @@ def endpoint_check(specification, stage, index, timeout, access=None):
         success = code in (302, 303, 307) and result.get("redirect", False)
         message = "HTTPS login redirect received; browser login and identity authorization were not tested."
     else:
-        success = 200 <= code < 400 or code in (401, 403)
-        message = "HTTP response received" + (" (application authentication required)." if code in (401, 403) else ".")
+        authentication_required = code in (401, 403) and (stage == "backend" or access == "application")
+        success = 200 <= code < 400 or authentication_required
+        message = "HTTP response received" + (" (application authentication required)." if authentication_required else ".")
     if not success:
         message = "HTTP response did not meet the configured access policy (status " + str(code) + ")."
     return check(stage, "ok" if success else "fail", message, "" if success else action, index)
@@ -247,7 +251,11 @@ def doctor(config, services, role, timeout=3, frp_config=None):
             backend.update(port=service["relay_port"], connect_host="127.0.0.1")
             if service["protocol"] == "tcp":
                 backend["host"] = "127.0.0.1"
-        checks.append(endpoint_check(backend, "backend", index, timeout))
+        backend_check = endpoint_check(backend, "backend", index, timeout)
+        if role == "server" and service["protocol"] == "tcp" and backend_check["status"] == "ok":
+            backend_check = check("backend", "unknown", "FRPS relay accepted TCP; origin backend reachability is unproven.",
+                                  "Run doctor --role client on the origin to check local TCP connectivity, then use a protocol-specific client through public ingress to verify end-to-end application behavior.", index)
+        checks.append(backend_check)
         if service["protocol"] == "tcp":
             host = config.get("frp_server_address")
             if not isinstance(host, str) or not host or any(character.isspace() for character in host):
@@ -272,7 +280,12 @@ The installed /etc/frp-tunnel/frpc.toml or frps.toml supplies loopback admin cre
 If absent, supply secrets.yml too. Files and output should remain private.
 Doctor only reads status and makes bounded TCP connections / HTTP GET / requests.
 It never follows redirects, submits passwords, mutates services or completes OIDC login.
-Server backend checks traverse the relay; run on the client to isolate local backend failure.
+Server HTTP backend checks traverse the relay; run on the client to isolate local failure.
+Server TCP backend checks are 'unknown' even when the relay accepts: FRPS acceptance
+does not prove origin reachability. Run doctor --role client on the origin and use a
+protocol-specific client through public ingress to verify end-to-end application behavior.
+Any failed or unknown check makes doctor exit nonzero, including healthy generic TCP
+services checked on the server.
 Public checks use this machine's network; repeat externally to detect ingress firewall issues.
 An 'ok' TCP check proves a handshake only, not backend/application health.
 Logs (review privately; journals may contain endpoints):
