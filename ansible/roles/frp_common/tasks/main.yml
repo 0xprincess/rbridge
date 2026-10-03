@@ -124,9 +124,11 @@
     group: root
     creates: "{{ frp_binary_dir }}/frpc"
 
-- name: Install the private shared authentication token
+# Persist only the revision-bound credential, never the private base secret.
+# Its change restarts FRP before the relay installs any new ingress policy.
+- name: Install the private revision-bound authentication token
   ansible.builtin.copy:
-    content: "{{ frp_token }}\n"
+    content: "{{ frp_token | frp_revision_token(frp_services_normalized, frp_oidc | default(none)) }}\n"
     dest: /etc/frp-tunnel/token
     owner: "{{ frp_service_user }}"
     group: "{{ frp_service_user }}"
