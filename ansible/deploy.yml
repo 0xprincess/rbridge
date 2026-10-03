@@ -1,10 +1,21 @@
 ---
+- name: Validate every host before changing either side of the tunnel
+  hosts: frp_servers:frp_clients
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Validate the complete deployment
+      ansible.builtin.include_role:
+        name: frp_common
+        tasks_from: validate
+
 - name: Deploy the relay server
   hosts: frp_servers
   become: true
   roles:
     - frp_common
     - frp_server
+    - frp_web
 
 - name: Deploy the Linux or WSL client
   hosts: frp_clients

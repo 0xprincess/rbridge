@@ -1,0 +1,11 @@
+# Managed by frp-tunnel; only explicit TCP services receive public listeners.
+[Unit]
+Description=Public TCP listener for {{ item.name }}
+After=network.target
+
+[Socket]
+ListenStream=0.0.0.0:{{ item.public_port }}
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target
