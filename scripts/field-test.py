@@ -465,6 +465,12 @@ class Suite:
                         page.url.startswith(f"https://idp.{self.domain}/"),
                         "OIDC identity spoofing bypassed authorization")
                 context.close()
+            except Exception:
+                if ARTIFACTS:
+                    (ARTIFACTS / "browser.html").write_text(page.content())
+                    (ARTIFACTS / "browser-url.txt").write_text(page.url)
+                    page.screenshot(path=str(ARTIFACTS / "browser.png"), full_page=True)
+                raise
             finally:
                 browser.close()
         self.mark("trusted browser TLS, WebSockets, incremental streaming and real Dex OIDC allow/deny callbacks")
