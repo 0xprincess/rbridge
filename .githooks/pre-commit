@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+for interpreter in python python3; do
+    if command -v "$interpreter" >/dev/null 2>&1 &&
+       [ "$("$interpreter" -c 'import sys; print(sys.version_info[0])' 2>/dev/null)" = "3" ]; then
+        exec "$interpreter" scripts/check-privacy.py --staged
+    fi
+done
+echo 'A working Python 3 interpreter is required for the privacy check.' >&2
+exit 1

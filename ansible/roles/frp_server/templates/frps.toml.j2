@@ -1,0 +1,14 @@
+# The control port is reachable only through the authenticated SSH relay.
+bindAddr = "127.0.0.1"
+bindPort = {{ frp_server_port | int }}
+proxyBindAddr = "0.0.0.0"
+allowPorts = [{ single = {{ frp_public_ssh_port | int }} }]
+maxPortsPerClient = 1
+auth.method = "token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/frp-tunnel/token"
+transport.tcpMux = false
+log.to = "console"
+log.level = "info"
+log.disablePrintColor = true

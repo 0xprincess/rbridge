@@ -1,0 +1,12 @@
+---
+- name: Restart FRP server
+  listen: Restart FRP authentication
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-server
+    daemon_reload: true
+    state: restarted
+
+- name: Reload relay SSH policy
+  ansible.builtin.systemd_service:
+    name: ssh
+    state: reloaded

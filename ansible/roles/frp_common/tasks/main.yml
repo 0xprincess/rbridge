@@ -1,0 +1,159 @@
+---
+- name: Validate the supported platform and configuration
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['distribution'] == 'Ubuntu'
+      - ansible_facts['distribution_major_version'] | int >= 24
+      - ansible_facts['service_mgr'] == 'systemd'
+      - ansible_facts['architecture'] in frp_architectures
+      - frp_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
+      - frp_version in frp_checksums
+      - frp_checksums[frp_version][frp_architectures[ansible_facts['architecture']]] is match('^[a-f0-9]{64}$')
+      - frp_service_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_relay_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_service_user != frp_relay_user
+      - frp_service_user not in ['root', 'nobody']
+      - frp_relay_user not in ['root', 'nobody']
+      - frp_token is defined
+      - frp_token is match('^[a-f0-9]{64}$')
+      - frp_server_port | int >= 1024 and frp_server_port | int <= 65535
+      - frp_public_ssh_port | int >= 1024 and frp_public_ssh_port | int <= 65535
+      - frp_server_port | int != frp_public_ssh_port | int
+      - frp_forward_port | int >= 1024 and frp_forward_port | int <= 65535
+      - frp_backend_ssh_port | int >= 1024 and frp_backend_ssh_port | int <= 65535
+      - frp_forward_port | int != frp_backend_ssh_port | int
+      - frp_relay_ssh_port | int >= 1 and frp_relay_ssh_port | int <= 65535
+    fail_msg: Unsupported platform or invalid private deployment configuration.
+  no_log: true
+
+- name: Inspect the project configuration directory
+  ansible.builtin.stat:
+    path: /etc/frp-tunnel/.managed
+  register: frp_marker
+
+- name: Inspect an existing project directory
+  ansible.builtin.stat:
+    path: /etc/frp-tunnel
+  register: frp_existing
+
+- name: Refuse to adopt unrelated configuration
+  ansible.builtin.assert:
+    that:
+      - not frp_existing.stat.exists or frp_marker.stat.exists
+    fail_msg: /etc/frp-tunnel exists without the project ownership marker.
+
+- name: Read existing managed account names
+  ansible.builtin.slurp:
+    src: /etc/frp-tunnel/.managed
+  register: frp_account_marker
+  when: frp_marker.stat.exists
+  no_log: true
+
+- name: Refuse to reassign an existing deployment to other accounts
+  ansible.builtin.assert:
+    that:
+      - (frp_account_marker.content | b64decode | from_json).service_user == frp_service_user
+      - (frp_account_marker.content | b64decode | from_json).relay_user == frp_relay_user
+    fail_msg: Managed service accounts cannot be renamed during deployment.
+  when: frp_marker.stat.exists
+  no_log: true
+
+- name: Inspect candidate service accounts before adopting them
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item }}"
+    fail_key: false
+  loop:
+    - "{{ frp_service_user }}"
+    - "{{ frp_relay_user }}"
+  register: frp_candidate_accounts
+  no_log: true
+
+- name: Refuse to modify pre-existing unrelated accounts
+  ansible.builtin.assert:
+    that:
+      - frp_marker.stat.exists or item.ansible_facts.getent_passwd[item.item] is none
+    fail_msg: Choose unused dedicated account names for a fresh deployment.
+  loop: "{{ frp_candidate_accounts.results }}"
+  no_log: true
+
+- name: Install operating system dependencies
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - openssh-client
+      - openssh-server
+      - tar
+      - util-linux
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the unprivileged FRP service account
+  ansible.builtin.user:
+    name: "{{ frp_service_user }}"
+    system: true
+    create_home: false
+    home: /nonexistent
+    shell: /usr/sbin/nologin
+
+- name: Create project directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/frp-tunnel
+    - /var/cache/frp-tunnel
+    - "/usr/local/lib/frp-tunnel/{{ frp_version }}"
+
+- name: Mark the configuration directory as project managed
+  ansible.builtin.copy:
+    content: "{{ {'service_user': frp_service_user, 'relay_user': frp_relay_user} | to_json }}\n"
+    dest: /etc/frp-tunnel/.managed
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  diff: false
+
+- name: Select the release architecture
+  ansible.builtin.set_fact:
+    frp_arch: "{{ frp_architectures[ansible_facts['architecture']] }}"
+    frp_binary_dir: "/usr/local/lib/frp-tunnel/{{ frp_version }}"
+
+- name: Download the pinned upstream release without a proxy
+  ansible.builtin.get_url:
+    url: "https://github.com/fatedier/frp/releases/download/v{{ frp_version }}/frp_{{ frp_version }}_linux_{{ frp_arch }}.tar.gz"
+    dest: "/var/cache/frp-tunnel/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
+    checksum: "sha256:{{ frp_checksums[frp_version][frp_arch] }}"
+    use_proxy: false
+    use_netrc: false
+    validate_certs: true
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Extract the verified release
+  ansible.builtin.unarchive:
+    src: "/var/cache/frp-tunnel/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
+    dest: "{{ frp_binary_dir }}"
+    remote_src: true
+    extra_opts:
+      - --strip-components=1
+    owner: root
+    group: root
+    creates: "{{ frp_binary_dir }}/frpc"
+
+- name: Install the private shared authentication token
+  ansible.builtin.copy:
+    content: "{{ frp_token }}\n"
+    dest: /etc/frp-tunnel/token
+    owner: "{{ frp_service_user }}"
+    group: "{{ frp_service_user }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: Restart FRP authentication

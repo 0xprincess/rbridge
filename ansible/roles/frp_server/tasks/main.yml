@@ -1,0 +1,110 @@
+---
+- name: Validate the relay public key
+  ansible.builtin.assert:
+    that:
+      - frp_relay_public_key is defined
+      - "frp_relay_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"
+    fail_msg: A generated relay public key is required.
+  no_log: true
+
+- name: Create the forwarding-only relay account
+  ansible.builtin.user:
+    name: "{{ frp_relay_user }}"
+    system: true
+    create_home: true
+    home: "/var/lib/frp-tunnel-relay"
+    shell: /usr/sbin/nologin
+    password_lock: true
+
+- name: Restrict the relay home directory
+  ansible.builtin.file:
+    path: /var/lib/frp-tunnel-relay
+    state: directory
+    owner: "{{ frp_relay_user }}"
+    group: "{{ frp_relay_user }}"
+    mode: "0700"
+
+- name: Create the relay SSH directory
+  ansible.builtin.file:
+    path: /var/lib/frp-tunnel-relay/.ssh
+    state: directory
+    owner: "{{ frp_relay_user }}"
+    group: "{{ frp_relay_user }}"
+    mode: "0700"
+
+- name: Install only the restricted forwarding key for the relay account
+  ansible.builtin.copy:
+    content: 'restrict,port-forwarding,permitopen="127.0.0.1:{{ frp_server_port | int }}" {{ frp_relay_public_key | trim }}{{ "\n" }}'
+    dest: /var/lib/frp-tunnel-relay/.ssh/authorized_keys
+    owner: "{{ frp_relay_user }}"
+    group: "{{ frp_relay_user }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Restrict SSH forwarding for the project relay account
+  ansible.builtin.template:
+    src: sshd-relay.conf.j2
+    dest: /etc/ssh/sshd_config.d/00-frp-tunnel.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  no_log: true
+  diff: false
+  notify: Reload relay SSH policy
+
+- name: Validate the complete relay SSH configuration
+  ansible.builtin.command:
+    argv: [/usr/sbin/sshd, -t]
+  changed_when: false
+  no_log: true
+
+- name: Inspect effective forwarding account policy
+  ansible.builtin.command:
+    argv:
+      - /usr/sbin/sshd
+      - -T
+      - -C
+      - "user={{ frp_relay_user }},host=localhost,addr=127.0.0.1"
+  register: frp_relay_effective_policy
+  changed_when: false
+  no_log: true
+
+- name: Require the account-specific SSH restrictions to be effective
+  ansible.builtin.assert:
+    that:
+      - "'allowtcpforwarding local' in frp_relay_effective_policy.stdout_lines"
+      - "'allowstreamlocalforwarding no' in frp_relay_effective_policy.stdout_lines"
+      - "'authenticationmethods publickey' in frp_relay_effective_policy.stdout_lines"
+    fail_msg: The existing SSH policy must include the project account restrictions.
+  no_log: true
+
+- name: Install the loopback-only FRP server configuration
+  ansible.builtin.template:
+    src: frps.toml.j2
+    dest: /etc/frp-tunnel/frps.toml
+    owner: root
+    group: "{{ frp_service_user }}"
+    mode: "0640"
+    validate: "{{ frp_binary_dir }}/frps verify -c %s"
+  notify: Restart FRP server
+
+- name: Install the FRP server service
+  ansible.builtin.template:
+    src: frp-tunnel-server.service.j2
+    dest: /etc/systemd/system/frp-tunnel-server.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart FRP server
+
+- name: Apply pending server changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable the FRP server at boot
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-server
+    enabled: true
+    state: started
+    daemon_reload: true

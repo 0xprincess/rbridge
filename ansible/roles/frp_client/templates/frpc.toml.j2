@@ -1,0 +1,23 @@
+# The SSH transport encrypts and authenticates the complete control/data stream.
+serverAddr = "127.0.0.1"
+serverPort = {{ frp_forward_port | int }}
+loginFailExit = false
+auth.method = "token"
+auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
+auth.tokenSource.type = "file"
+auth.tokenSource.file.path = "/etc/frp-tunnel/token"
+transport.protocol = "tcp"
+transport.proxyURL = ""
+transport.tcpMux = false
+transport.tls.enable = false
+log.to = "console"
+log.level = "info"
+log.disablePrintColor = true
+
+[[proxies]]
+name = "wsl-ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = {{ frp_backend_ssh_port | int }}
+remotePort = {{ frp_public_ssh_port | int }}
+transport.useEncryption = true

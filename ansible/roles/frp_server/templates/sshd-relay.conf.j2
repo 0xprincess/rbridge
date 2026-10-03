@@ -1,0 +1,11 @@
+# This policy applies only to the project-owned forwarding account.
+Match User {{ frp_relay_user }}
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    AllowTcpForwarding local
+    AllowStreamLocalForwarding no
+    AllowAgentForwarding no
+    X11Forwarding no
+    PermitTTY no
+Match all
