@@ -1,0 +1,14 @@
+---
+# FRPS has restarted with the revision-bound token before web ingress changes.
+# Old clients cannot re-register reused relay ports even on --limit frp_servers.
+# Activate only after frp_web has also released removed/reassigned OIDC ports;
+# those loopback listeners would otherwise block a new wildcard TCP socket.
+# The earlier FRPS restart also releases v0.1's directly published SSH port.
+- name: Enable explicit public TCP listeners after applying FRP and web changes
+  ansible.builtin.systemd_service:
+    name: "frp-tunnel-publish-{{ item.name }}.socket"
+    enabled: true
+    state: started
+  loop: "{{ frp_tcp_services }}"
+  loop_control:
+    label: "{{ item.name }}"

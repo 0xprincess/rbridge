@@ -2,7 +2,10 @@
 
 import base64
 import binascii
+import hashlib
+import hmac
 import ipaddress
+import json
 import re
 from urllib.parse import urlsplit
 
@@ -218,9 +221,29 @@ def service_error(services, reserved_ports=(), oidc=None):
     return ""
 
 
+def revision_token(base_token, services, oidc=None):
+    """Bind FRP authentication to an already validated, normalized manifest.
+
+    Both hosts use the same canonical input, independent of inventory service or
+    mapping-key order. A changed backend, listener or access policy must revoke
+    *all* old registrations when FRPS restarts, including existing work streams.
+    Otherwise an old protected HTTP proxy could register a reused relay port
+    behind a new public TCP socket or HTTP route during a relay-only cutover.
+    HMAC keeps the private base credential out of the generated configuration;
+    there is deliberately no fallback accepting tokens from older revisions.
+    """
+    manifest = {"services": sorted(services, key=lambda service: service["name"])}
+    if any(service.get("access", {}).get("mode") == "oidc" for service in services):
+        manifest["oidc"] = oidc
+    canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+    return hmac.new(bytes.fromhex(base_token), b"frp-tunnel-service-revision-v1\0" + canonical,
+                    hashlib.sha256).hexdigest()
+
+
 class FilterModule:
     def filters(self):
         return {
             "frp_normalize_services": normalize_services,
             "frp_service_error": service_error,
+            "frp_revision_token": revision_token,
         }

@@ -106,13 +106,3 @@
     state: started
     daemon_reload: true
 
-# In v0.1 FRPS itself owned the public SSH port. Flush/restart above releases it
-# before socket activation claims it during the loopback-only migration.
-- name: Enable explicit public TCP listeners after applying loopback-only FRP
-  ansible.builtin.systemd_service:
-    name: "frp-tunnel-publish-{{ item.name }}.socket"
-    enabled: true
-    state: started
-  loop: "{{ frp_tcp_services }}"
-  loop_control:
-    label: "{{ item.name }}"
