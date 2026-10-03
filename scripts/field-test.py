@@ -359,7 +359,7 @@ class Suite:
         require(json.loads(self.http("basic", credentials="field:" + self.password))["fixture"] == "frp-field-origin",
                 "Basic credentials did not authorize backend")
         self.http("app", status=401)
-        self.http("app", headers=["X-App-Token: application-owned"])
+        self.http("app", headers=["Authorization: Bearer application-owned"])
         self.http("secure")
         # The same CA signs this deliberately wrong identity; a chain-only check must fail.
         wrong = copy.deepcopy(self.values)
@@ -424,7 +424,8 @@ class Suite:
                     page = context.new_page()
                     requests = []
                     page.on("request", lambda request: requests.append(request.url))
-                    page.goto(f"https://oidc.{self.domain}/")
+                    destination = f"https://oidc.{self.domain}/private?next=%2Freport%3Fa%3D1&view=details"
+                    page.goto(destination)
                     login = page.locator('input[name="login"]')
                     if not login.count():
                         page.get_by_text("Log in with Email", exact=False).click()
@@ -438,6 +439,7 @@ class Suite:
                             "Browser did not complete real authorization-code callback")
                     if allowed:
                         result = json.loads(body)
+                        require(page.url == destination, "OIDC callback did not restore the original path and query")
                         headers = {key.lower(): value for key, value in result["headers"].items()}
                         require(headers.get("x-auth-request-email") == "allowed@example.test",
                                 "OIDC did not propagate verified identity")

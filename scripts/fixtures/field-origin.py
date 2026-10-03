@@ -18,7 +18,7 @@ async def echo(reader, writer):
 
 
 async def app(request):
-    if request.host.startswith("app.") and request.headers.get("X-App-Token") != "application-owned":
+    if request.host.startswith("app.") and request.headers.get("Authorization") != "Bearer application-owned":
         return web.Response(status=401, text="application authentication required")
     if request.path == "/ws":
         ws = web.WebSocketResponse()
