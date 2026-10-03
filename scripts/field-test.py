@@ -110,11 +110,13 @@ class Suite:
         self.remote(host, "umask 077; cat > " + shlex.quote(path) + "; chmod " + mode + " " +
                     shlex.quote(path), data=data)
 
-    def deploy(self, values=None, fail=False):
+    def deploy(self, values=None, fail=False, *, limit=None):
         path = self.folder / "deployment.json"
         path.write_text(json.dumps(self.values if values is None else values))
         argv = ["ansible-playbook", "-i", str(self.args.inventory), "-e", "@" + str(path),
                 str(ROOT / "ansible/deploy.yml")]
+        if limit:
+            argv += ["--limit", limit]
         if self.args.ssh_config:
             argv += ["--ssh-common-args", "-F " + shlex.quote(str(self.args.ssh_config)) +
                      " -o StrictHostKeyChecking=yes -o BatchMode=yes"]
@@ -310,17 +312,30 @@ class Suite:
                                      "127.0.0.1:0:127.0.0.1:17000", argv[-1]], timeout=15, allow_failure=True)
         require(denied.returncode != 0 and b"remote port forwarding failed" in denied.stderr,
                 "Relay allowed remote forwarding")
+        relay_ports = {self.values["frp_server_port"], self.values["frp_server_admin_port"], 14180}
+        relay_ports.update(service["relay_port"] for service in self.services)
+        origin_ports = {self.values["frp_forward_port"], self.values["frp_client_admin_port"],
+                        self.values["frp_backend_ssh_port"], 18080, 18081, 18443, 15556}
+        self.private_listeners("relay", relay_ports)
+        # These listeners live on the origin VPS, not self.address (the relay).
+        # Inspect actual binds so even a firewall cannot conceal an auth bypass.
+        self.private_listeners("client", origin_ports)
         if not self.args.local:
-            for port in [17000, 17400, 17401, 14180, 18080, 18443, 15556] + [s["relay_port"] for s in self.services]:
+            for port in relay_ports:
                 self.closed(port)
-        else:
-            listeners = self.remote("relay", "ss -lntH").stdout.decode().splitlines()
-            private_ports = {17000, 17400, 17401, 14180} | {s["relay_port"] for s in self.services}
-            for line in listeners:
-                address = line.split()[3]
-                if int(address.rsplit(":", 1)[1]) in private_ports:
-                    require(address.startswith("127.0.0.1:"), "Private listener escaped loopback")
         self.mark("relay forwarding restrictions and no public authentication bypass")
+
+    def private_listeners(self, host, ports):
+        listeners = self.remote(host, "ss -lntH").stdout.decode().splitlines()
+        found = set()
+        for line in listeners:
+            address, port = line.split()[3].rsplit(":", 1)
+            port = int(port)
+            if port in ports:
+                found.add(port)
+                require(address in ("127.0.0.1", "[::1]", "::1"),
+                        host + " private listener escaped loopback")
+        require(found == ports, host + " private listener check did not observe every expected service")
 
     def closed(self, port):
         try:
@@ -549,6 +564,87 @@ print(json.dumps(result,sort_keys=True))
                 "Repeated deployment was not idempotent")
         self.mark("invalid/colliding configuration rejected without mutation; second apply changes zero")
 
+    def cutover(self):
+        basic = next(service for service in self.services if service["name"] == "basic")
+        oidc = next(service for service in self.services if service["name"] == "oidc")
+        revised = copy.deepcopy(self.values)
+        revised["frp_services"] = [service for service in revised["frp_services"] if service["name"] != "oidc"]
+        published = next(service for service in revised["frp_services"] if service["name"] == "basic")
+        published.clear()
+        published.update(name="basic", protocol="tcp", backend="127.0.0.1:18081",
+                         relay_port=basic["relay_port"], public_port=oidc["access"]["port"])
+        # Exercise HTTP ingress as well as socket publication against a relay port
+        # that previously belonged to a protected registration.
+        public = next(service for service in revised["frp_services"] if service["name"] == "public")
+        public["relay_port"] = oidc["relay_port"]
+        self.http("basic", status=401)
+        self.http("basic", credentials="field:" + self.password)
+        client_files = "/etc/frp-tunnel/frpc.toml"
+        if not self.args.local:
+            client_files += " /etc/frp-tunnel/token"
+        client_before = self.remote("client", "sha256sum " + client_files).stdout
+        with socket.create_connection((self.address, 2233), timeout=5) as persistent:
+            persistent.sendall(b"before-revision")
+            require(persistent.recv(64) == b"before-revision", "Persistent pre-cutover TCP service failed")
+            # No client play may run: this is the interrupted/--limit deployment.
+            self.deploy(revised, limit="frp_servers")
+            require(client_before == self.remote("client", "sha256sum " + client_files).stdout,
+                    "Relay-only cutover unexpectedly changed the origin revision")
+            try:
+                require(persistent.recv(1) == b"", "Old revision retained an established data connection")
+            except ConnectionResetError:
+                pass
+            except TimeoutError:
+                raise Failure("Old revision retained an established data connection") from None
+        self.remote("relay", "systemctl is-active frp-tunnel-publish-basic.socket")
+        listeners = self.remote("relay", "ss -lntH").stdout.decode().splitlines()
+        require(any(line.split()[3] == "0.0.0.0:" + str(published["public_port"]) for line in listeners),
+                "Public TCP socket did not bind the removed OIDC listener port")
+        state = self.remote("relay", "systemctl is-active frp-tunnel-oidc-oidc", allow_failure=True)
+        require(state.returncode != 0, "Removed OIDC process still owns its old listener")
+        if not self.args.local:
+            # A restarted old origin must still be unable to register, not merely
+            # the old process that was disconnected during the server restart.
+            self.remote("client", "systemctl restart frp-tunnel-client")
+        # The one-VM fixture shares /etc/frp-tunnel/token between inventory aliases;
+        # keep its old running FRPC credential rather than reread the relay file.
+        # In either mode observe reconnect attempts, not only the first refused SYN.
+        request = f"GET / HTTP/1.1\r\nHost: basic.{self.domain}\r\nConnection: close\r\n\r\n".encode()
+        deadline = time.monotonic() + 15
+        while True:
+            try:
+                with socket.create_connection((self.address, published["public_port"]), timeout=2) as connection:
+                    connection.sendall(request)
+                    require(connection.recv(4096) == b"",
+                            "Old protected HTTP registration leaked through the reused public TCP route")
+            except (ConnectionError, TimeoutError):
+                pass
+            self.http("public", status=502)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(1)
+
+        def revised_backends():
+            with socket.create_connection((self.address, published["public_port"]), timeout=5) as connection:
+                connection.sendall(b"new-revision")
+                require(connection.recv(64) == b"new-revision", "Revised TCP route did not reach the new backend")
+            require(json.loads(self.http("public"))["fixture"] == "frp-field-origin",
+                    "Revised HTTP route did not reach its backend")
+
+        self.deploy(revised)
+        eventually(revised_backends, "Full cutover did not restore the revised backends")
+        second = self.deploy(revised)
+        recaps = re.findall(r"changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", second.stdout.decode())
+        require(len(recaps) == 2 and all(row == ("0", "0", "0") for row in recaps),
+                "Identical cutover reapply was not idempotent")
+        self.deploy()
+        eventually(self.tcp, "TCP services did not recover after restoring the original revision")
+        eventually(lambda: self.http("public"), "HTTP service did not recover after restoring the original revision")
+        self.http("basic", status=401)
+        self.private_listeners("relay", {oidc["access"]["port"]})
+        self.mark("relay-only revisions revoke old registrations/connections; HTTP/TCP port reuse fails closed")
+        self.mark("removed OIDC port reused for public TCP; full cutover and identical reapply succeed")
+
     def removal(self):
         reduced = dict(self.values, frp_managed_ssh=False,
                        frp_services=[s for s in self.services if s["name"] == "echo"])
@@ -607,6 +703,7 @@ print(json.dumps(result,sort_keys=True))
             self.browser()
             self.faults()
             self.validation()
+            self.cutover()
             self.removal()
             if self.args.keep_fixtures:
                 self.deploy()

@@ -147,19 +147,3 @@
     label: "{{ app.name }}"
   no_log: true
 
-- name: Require every published authenticator to become ready
-  ansible.builtin.uri:
-    url: "http://127.0.0.1:{{ app.access.port }}/ready"
-    use_proxy: false
-    status_code: 200
-  loop: "{{ frp_web_oidc_apps }}"
-  loop_control:
-    loop_var: app
-    label: "{{ app.name }}"
-  register: frp_web_oidc_ready
-  until: frp_web_oidc_ready.status | default(0) == 200
-  retries: 15
-  delay: 2
-  changed_when: false
-  no_log: true
-

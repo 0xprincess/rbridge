@@ -178,5 +178,86 @@ class ServiceModelTests(unittest.TestCase):
         self.assertEqual(CONFIG.service_error([tcp()]), "")
 
 
+class RevisionTokenTests(unittest.TestCase):
+    base_token = "0123456789abcdef" * 4
+
+    def token(self, services, *, base_token=None, provider=None):
+        provider = oidc() if provider is None else provider
+        normalized = CONFIG.normalize_services(services, oidc=provider)
+        return CONFIG.revision_token(base_token or self.base_token, normalized, provider)
+
+    def test_both_hosts_derive_the_same_private_token_from_canonical_manifest(self):
+        services = [tcp(), web(access={"mode": "basic", "users": {
+            "alice": "$2b$12$" + "A" * 53, "bob": "$2b$12$" + "B" * 53}})]
+        original = copy.deepcopy(services)
+        # Independent inventory hosts may enumerate services/dictionary keys differently.
+        reordered = [dict(reversed(list(service.items()))) for service in reversed(services)]
+        reordered[0]["access"] = {"users": dict(reversed(list(services[1]["access"]["users"].items()))),
+                                   "mode": "basic"}
+        token = self.token(services)
+        self.assertEqual(token, self.token(reordered))
+        self.assertEqual(token, self.token(copy.deepcopy(services)))
+        self.assertRegex(token, r"^[a-f0-9]{64}$")
+        self.assertNotEqual(token, self.base_token)
+        self.assertEqual(services, original)
+        self.assertNotEqual(token, self.token(services, base_token="f" * 64))
+
+    def test_every_service_mapping_field_binds_the_revision(self):
+        initial = [tcp(), web()]
+        token = self.token(initial)
+        changes = [
+            (0, "name", "renamed-ssh"),
+            (0, "backend", "127.0.0.1:2223"),
+            (0, "relay_port", 12223),
+            (0, "public_port", 2223),
+            (1, "backend", "http://other.internal:8080"),
+            (1, "backend", "https://localhost:8080"),
+            (1, "hostname", "other.example.invalid"),
+            (1, "access", {"mode": "application"}),
+            (1, "access", {"mode": "basic", "users": {"alice": "$2b$12$" + "A" * 53}}),
+        ]
+        for index, field, value in changes:
+            revised = copy.deepcopy(initial)
+            revised[index][field] = value
+            with self.subTest(index=index, field=field):
+                self.assertNotEqual(token, self.token(revised))
+        self.assertNotEqual(token, self.token([tcp()]))
+        self.assertNotEqual(token, self.token(initial + [tcp(name="extra", relay_port=12223, public_port=2223)]))
+
+    def test_protected_http_to_tcp_port_reuse_cannot_keep_old_registration_token(self):
+        protected = web(access={"mode": "basic", "users": {"alice": "$2b$12$" + "A" * 53}})
+        published = tcp(name=protected["name"], relay_port=protected["relay_port"], public_port=18100,
+                        backend="localhost:8080")
+        self.assertNotEqual(self.token([protected]), self.token([published]))
+        # Authentication edits alone invalidate the registration too, with no FRPS port change.
+        revised = copy.deepcopy(protected)
+        revised["access"]["users"]["alice"] = "$2b$12$" + "B" * 53
+        self.assertNotEqual(self.token([protected]), self.token([revised]))
+        revised["access"] = {"mode": "public"}
+        self.assertNotEqual(self.token([protected]), self.token([revised]))
+
+    def test_oidc_policy_provider_and_auth_port_bind_the_revision(self):
+        token = self.token([authenticated_web()])
+        for changes in ({"port": 18101}, {"allowed_domains": ["other.invalid"]},
+                        {"allowed_emails": ["alice@example.invalid"]}):
+            with self.subTest(fields=list(changes)):
+                self.assertNotEqual(token, self.token([authenticated_web(**changes)]))
+        for field, value in (("issuer_url", "https://other.example.invalid"),
+                             ("client_id", "other-app"), ("client_secret", "another-private-credential"),
+                             ("cookie_secret", base64.urlsafe_b64encode(b"x" * 32).decode())):
+            provider = oidc()
+            provider[field] = value
+            with self.subTest(field=field):
+                self.assertNotEqual(token, self.token([authenticated_web()], provider=provider))
+        provider = dict(reversed(list(oidc().items())))
+        self.assertEqual(token, self.token([authenticated_web()], provider=provider))
+
+    def test_normalized_hostname_and_oidc_identity_casing_is_shared(self):
+        lower = authenticated_web(allowed_domains=["example.invalid"], allowed_emails=["alice@example.invalid"])
+        upper = authenticated_web(allowed_domains=["EXAMPLE.INVALID"], allowed_emails=["Alice@EXAMPLE.INVALID"])
+        upper["hostname"] = "APP.EXAMPLE.INVALID"
+        self.assertEqual(self.token([lower]), self.token([upper]))
+
+
 if __name__ == "__main__":
     unittest.main()

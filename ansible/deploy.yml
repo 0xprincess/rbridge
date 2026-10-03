@@ -16,6 +16,11 @@
     - frp_common
     - frp_server
     - frp_web
+  post_tasks:
+    - name: Activate public TCP sockets after obsolete web listeners are removed
+      ansible.builtin.include_role:
+        name: frp_server
+        tasks_from: activate
 
 - name: Deploy the Linux or WSL client
   hosts: frp_clients
@@ -23,3 +28,15 @@
   roles:
     - frp_common
     - frp_client
+
+# A provider may itself be published through this revision of the tunnel.
+# Check readiness after client rollout, not while its old token is revoked.
+# Relay-only applies remain fail-closed and can fail here until clients update.
+- name: Validate relay authentication after client rollout
+  hosts: frp_servers
+  become: true
+  tasks:
+    - name: Require the configured OIDC authenticators to be ready
+      ansible.builtin.include_role:
+        name: frp_web
+        tasks_from: ready
