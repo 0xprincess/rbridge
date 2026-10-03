@@ -41,16 +41,20 @@ printed. Check stages:
 | `backend` | Client checks the actual backend; relay checks traverse its loopback FRP endpoint |
 | `public_ingress` | Public TCP connection or hostname-specific HTTPS response with normal TLS verification |
 
-A TCP `ok` means only a handshake, not application readiness or a complete
-transfer. A relay socket proxy can accept a connection while its backend is
-unavailable. Run client-side backend checks and use the actual protocol client.
+A client-side or public TCP `ok` means only a handshake, not application
+readiness or a complete transfer. A relay socket proxy can accept a connection
+while its backend is unavailable. Server-side TCP backend checks therefore
+report `unknown` even when the relay listener accepts: a deployment containing
+generic TCP services can legitimately return exit 1 on the server. Use the
+client-side doctor and a real protocol client to establish backend health.
 HTTP checks require a real response: a dead backend or broken TLS does not pass
 merely because a listener accepted TCP.
 
 Basic ingress checks expect a 401 challenge; OIDC expects a login redirect.
 These checks do not submit credentials, follow redirects, or prove browser
 login/token exchange. Test that separately. Application-owned authentication may
-legitimately respond 401/403. Doctor issues read-only status requests and bounded
+legitimately respond 401/403; public HTTP ingress requires a 2xx/3xx response.
+Doctor issues read-only status requests and bounded
 TCP/HTTP GET probes; `--timeout` controls each probe's wall-clock deadline,
 including DNS. Public checks originate from the machine running doctor, so
 repeat from an external client network to detect ingress firewall/filtering issues.
