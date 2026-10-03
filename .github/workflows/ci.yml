@@ -1,0 +1,67 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        python: ['3.11', '3.12', '3.13']
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m unittest discover -s tests -v
+      - run: python scripts/check-privacy.py --history
+      - name: Check playbook syntax with documentation-only inventory
+        env:
+          ANSIBLE_CONFIG: ansible/ansible.cfg
+        run: ansible-playbook -i ansible/inventory.example.yml ansible/deploy.yml --syntax-check
+
+  deployment-integration:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - name: Prepare an isolated tool environment
+        run: |
+          python -m venv "$RUNNER_TEMP/frp-tools"
+          "$RUNNER_TEMP/frp-tools/bin/python" -m pip install -r requirements-dev.txt
+      - name: Provision and test the disposable runner VM
+        run: |
+          sudo env PATH="$RUNNER_TEMP/frp-tools/bin:$PATH" \
+            "$RUNNER_TEMP/frp-tools/bin/python" scripts/integration-test.py \
+            --user "$(id -un)" --apply-to-disposable-host
+
+  windows-startup-syntax:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Parse the startup script without registering a task
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $PWD 'scripts/register-wsl-startup.ps1'),
+            [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -gt 0) { throw 'PowerShell syntax validation failed.' }

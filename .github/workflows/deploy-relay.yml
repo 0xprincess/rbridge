@@ -1,0 +1,54 @@
+name: Deploy relay
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: relay-deployment
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment: production
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Materialize and mask private deployment inputs
+        env:
+          DEPLOY_PRIVATE_KEY: ${{ secrets.DEPLOY_PRIVATE_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_INVENTORY: ${{ secrets.DEPLOY_INVENTORY }}
+          TUNNEL_SECRETS: ${{ secrets.TUNNEL_SECRETS }}
+        run: python scripts/prepare-ci-deployment.py
+      - name: Apply only the remote relay role
+        env:
+          ANSIBLE_CONFIG: ansible/ansible.cfg
+        run: |
+          export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/frp-tunnel/known_hosts -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
+          ansible-playbook \
+            -i "$RUNNER_TEMP/frp-tunnel/inventory.yml" \
+            -e "@$RUNNER_TEMP/frp-tunnel/secrets.yml" \
+            --private-key "$RUNNER_TEMP/frp-tunnel/admin.key" \
+            --limit frp_servers ansible/deploy.yml
+      - name: Remove private runner files
+        if: always()
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import shutil
+          path = Path(os.environ['RUNNER_TEMP']) / 'frp-tunnel'
+          if path.exists():
+              shutil.rmtree(path)
+          PY

@@ -1,0 +1,26 @@
+[Unit]
+Description=FRP tunnel client
+Wants=network-online.target frp-tunnel-sshd.service
+After=network-online.target frp-tunnel-sshd.service frp-tunnel-transport.service
+Requires=frp-tunnel-transport.service
+PartOf=frp-tunnel-transport.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ frp_service_user }}
+Group={{ frp_service_user }}
+UnsetEnvironment=HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy
+ExecStartPre={{ frp_binary_dir }}/frpc verify -c /etc/frp-tunnel/frpc.toml
+ExecStart={{ frp_binary_dir }}/frpc -c /etc/frp-tunnel/frpc.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

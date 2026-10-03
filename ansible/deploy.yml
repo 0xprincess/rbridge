@@ -1,0 +1,14 @@
+---
+- name: Deploy the relay server
+  hosts: frp_servers
+  become: true
+  roles:
+    - frp_common
+    - frp_server
+
+- name: Deploy the Linux or WSL client
+  hosts: frp_clients
+  become: true
+  roles:
+    - frp_common
+    - frp_client

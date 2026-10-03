@@ -1,0 +1,19 @@
+---
+- name: Restart tunneled SSH
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-sshd
+    daemon_reload: true
+    state: restarted
+
+- name: Restart FRP transport
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-transport
+    daemon_reload: true
+    state: restarted
+
+- name: Restart FRP client
+  listen: Restart FRP authentication
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-client
+    daemon_reload: true
+    state: restarted

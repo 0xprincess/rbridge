@@ -1,0 +1,3 @@
+#!/bin/sh
+# systemd services alone do not keep a WSL distribution alive.
+exec /usr/bin/flock -n /run/frp-tunnel-keepalive.lock /bin/sh -c 'systemctl start frp-tunnel-sshd.service frp-tunnel-transport.service frp-tunnel-client.service && exec /usr/bin/sleep infinity'

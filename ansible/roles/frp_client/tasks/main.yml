@@ -1,0 +1,124 @@
+---
+- name: Validate client inputs without printing private configuration
+  ansible.builtin.assert:
+    that:
+      - frp_server_address is defined
+      - frp_server_address is match('^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$')
+      - frp_login_user is defined
+      - frp_login_user is match('^[a-z_][a-z0-9_-]{0,30}$')
+      - frp_login_user != 'root'
+      - frp_login_public_key is defined
+      - "frp_login_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"
+      - frp_relay_private_key is defined
+      - frp_relay_known_hosts is defined
+      - frp_relay_known_hosts | trim | length > 0
+    fail_msg: Valid client identity, key pair, address, and verified host keys are required.
+  no_log: true
+
+- name: Require an existing login account
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ frp_login_user }}"
+  no_log: true
+
+- name: Install the relay private key
+  ansible.builtin.copy:
+    content: "{{ frp_relay_private_key | trim }}\n"
+    dest: /etc/frp-tunnel/relay.key
+    owner: "{{ frp_service_user }}"
+    group: "{{ frp_service_user }}"
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: Restart FRP transport
+
+- name: Install verified relay host keys
+  ansible.builtin.copy:
+    content: "{{ frp_relay_known_hosts | trim }}\n"
+    dest: /etc/frp-tunnel/known_hosts
+    owner: root
+    group: "{{ frp_service_user }}"
+    mode: "0640"
+  no_log: true
+  diff: false
+  notify: Restart FRP transport
+
+- name: Install the public key for the dedicated tunneled SSH service
+  ansible.builtin.copy:
+    content: "{{ frp_login_public_key | trim }}\n"
+    dest: /etc/frp-tunnel/login_authorized_keys
+    owner: root
+    group: root
+    mode: "0644"
+  no_log: true
+  diff: false
+
+- name: Create the OpenSSH privilege separation runtime directory
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the isolated key-only SSH configuration
+  ansible.builtin.template:
+    src: sshd_config.j2
+    dest: /etc/frp-tunnel/sshd_config
+    owner: root
+    group: root
+    mode: "0644"
+    validate: /usr/sbin/sshd -t -f %s
+  no_log: true
+  diff: false
+  notify: Restart tunneled SSH
+
+- name: Install the FRP client configuration
+  ansible.builtin.template:
+    src: frpc.toml.j2
+    dest: /etc/frp-tunnel/frpc.toml
+    owner: root
+    group: "{{ frp_service_user }}"
+    mode: "0640"
+    validate: "{{ frp_binary_dir }}/frpc verify -c %s"
+  notify: Restart FRP client
+
+- name: Install client services
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - frp-tunnel-transport.service
+    - frp-tunnel-sshd.service
+    - frp-tunnel-client.service
+  no_log: true
+  diff: false
+  notify:
+    - Restart tunneled SSH
+    - Restart FRP transport
+    - Restart FRP client
+
+- name: Install the WSL keepalive helper
+  ansible.builtin.template:
+    src: frp-tunnel-keepalive.j2
+    dest: /usr/local/sbin/frp-tunnel-keepalive
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Apply pending client changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Enable client services at boot
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop:
+    - frp-tunnel-sshd
+    - frp-tunnel-transport
+    - frp-tunnel-client

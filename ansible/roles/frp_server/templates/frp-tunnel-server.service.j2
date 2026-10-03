@@ -1,0 +1,23 @@
+[Unit]
+Description=FRP tunnel server
+Wants=network-online.target
+After=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User={{ frp_service_user }}
+Group={{ frp_service_user }}
+ExecStartPre={{ frp_binary_dir }}/frps verify -c /etc/frp-tunnel/frps.toml
+ExecStart={{ frp_binary_dir }}/frps -c /etc/frp-tunnel/frps.toml
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

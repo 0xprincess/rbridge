@@ -1,0 +1,16 @@
+---
+frp_version: "0.71.0"
+frp_checksums:
+  "0.71.0":
+    amd64: "84f27e39f11169f7adcef8e8b70c9329de17747b1f14dad9fb95eef5682ea716"
+    arm64: "f33c293c275d8fc68c654b6fba8f10b2551d6463d09a9fc9cffb7227eae82266"
+frp_architectures:
+  x86_64: amd64
+  aarch64: arm64
+frp_service_user: frp-tunnel
+frp_relay_user: frp-relay
+frp_server_port: 7000
+frp_forward_port: 17001
+frp_public_ssh_port: 2222
+frp_backend_ssh_port: 2222
+frp_relay_ssh_port: 22

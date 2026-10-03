@@ -1,0 +1,19 @@
+# Copy outside the checkout and replace the documentation-only values.
+all:
+  vars:
+    frp_server_address: relay.example.invalid
+    frp_relay_ssh_port: 22
+    frp_public_ssh_port: 2222
+    frp_backend_ssh_port: 2222
+    frp_login_user: developer
+  children:
+    frp_servers:
+      hosts:
+        relay:
+          ansible_host: relay.example.invalid
+          ansible_user: root
+    frp_clients:
+      hosts:
+        wsl:
+          ansible_connection: local
+          ansible_host: localhost
