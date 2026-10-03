@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
 """Materialize environment secrets into a private ephemeral Actions directory."""
 
+import importlib.util
 import os
 from pathlib import Path
 import sys
 
 import yaml
+
+spec = importlib.util.spec_from_file_location("tunnel_cli", Path(__file__).with_name("tunnel.py"))
+tunnel = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(tunnel)
 
 
 def mask(value):
@@ -35,13 +40,20 @@ def main():
         "DEPLOY_KNOWN_HOSTS": "known_hosts",
         "DEPLOY_INVENTORY": "inventory.yml",
         "TUNNEL_SECRETS": "secrets.yml",
+        "TUNNEL_SERVICES": "services.yml",
     }
     if any(not os.environ.get(name, "").strip() for name in required):
         raise ValueError("Missing deployment environment secrets.")
     for name in required:
         mask(os.environ[name])
-    for name in ("DEPLOY_INVENTORY", "TUNNEL_SECRETS"):
-        mask_tree(yaml.safe_load(os.environ[name]))
+    parsed = {}
+    for name in ("DEPLOY_INVENTORY", "TUNNEL_SERVICES", "TUNNEL_SECRETS"):
+        value = yaml.safe_load(os.environ[name])
+        if not isinstance(value, dict):
+            raise ValueError("Deployment YAML inputs must be mappings.")
+        mask_tree(value)
+        parsed[name] = value
+    tunnel.validate_config({**parsed["TUNNEL_SERVICES"], **parsed["TUNNEL_SECRETS"]})
     destination = Path(os.environ["RUNNER_TEMP"]) / "frp-tunnel"
     destination.mkdir(mode=0o700, exist_ok=False)
     for name, filename in required.items():

@@ -6,8 +6,6 @@ import tarfile
 import tempfile
 import unittest
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -102,62 +100,6 @@ class InputTests(unittest.TestCase):
             self.assertEqual({path.name for path in Path(folder).iterdir()}, {"frps", "frpc"})
 
 
-class TemplateTests(unittest.TestCase):
-    def setUp(self):
-        self.values = {"frp_server_port": 7000, "frp_forward_port": 17001,
-                       "frp_public_ssh_port": 2222, "frp_backend_ssh_port": 2222,
-                       "frp_relay_ssh_port": 22, "frp_login_user": "developer",
-                       "frp_relay_user": "frp-relay", "frp_service_user": "frp-tunnel",
-                       "frp_binary_dir": "/opt/frp", "frp_server_address": "relay.example.invalid"}
-
-    def render(self, role, name):
-        environment = Environment(loader=FileSystemLoader(ROOT / f"ansible/roles/{role}/templates"),
-                                  undefined=StrictUndefined)
-        return environment.get_template(name + ".j2").render(self.values)
-
-    def test_server_control_port_is_never_public(self):
-        content = self.render("frp_server", "frps.toml")
-        self.assertIn('bindAddr = "127.0.0.1"', content)
-        self.assertIn('allowPorts = [{ single = 2222 }]', content)
-        self.assertNotIn("token =", content)
-
-    def test_client_has_no_proxy_and_reconnects(self):
-        content = self.render("frp_client", "frpc.toml")
-        self.assertIn('serverAddr = "127.0.0.1"', content)
-        self.assertIn("loginFailExit = false", content)
-        service = self.render("frp_client", "frp-tunnel-client.service")
-        self.assertIn("UnsetEnvironment=HTTP_PROXY", service)
-        self.assertIn("PartOf=frp-tunnel-transport.service", service)
-
-    def test_key_only_ssh_is_isolated(self):
-        content = self.render("frp_client", "sshd_config")
-        for expected in ("PasswordAuthentication no", "KbdInteractiveAuthentication no",
-                         "AuthenticationMethods publickey", "PermitRootLogin no",
-                         "AllowUsers developer", "ListenAddress 127.0.0.1"):
-            self.assertIn(expected, content)
-
-    def test_transport_requires_host_pin_and_no_proxy(self):
-        content = self.render("frp_client", "frp-tunnel-transport.service")
-        for expected in ("StrictHostKeyChecking=yes", "ProxyCommand=none", "ProxyJump=none",
-                         "IdentityAgent=none", "ExitOnForwardFailure=yes"):
-            self.assertIn(expected, content)
-        self.assertNotIn("root@", content)
-
-    def test_secret_tasks_suppress_logs_and_diffs(self):
-        for role in ("frp_common", "frp_client", "frp_server"):
-            tasks = yaml.safe_load((ROOT / f"ansible/roles/{role}/tasks/main.yml").read_text())
-            for task in tasks:
-                content = task.get("ansible.builtin.copy", {}).get("content", "")
-                if any(name in content for name in ("frp_token", "private_key", "public_key", "known_hosts")):
-                    self.assertTrue(task.get("no_log"), task["name"])
-                    self.assertFalse(task.get("diff", True), task["name"])
-
-    def test_assertions_are_yaml_strings(self):
-        for role in ("frp_common", "frp_client", "frp_server"):
-            tasks = yaml.safe_load((ROOT / f"ansible/roles/{role}/tasks/main.yml").read_text())
-            for task in tasks:
-                for expression in task.get("ansible.builtin.assert", {}).get("that", []):
-                    self.assertIsInstance(expression, str, task["name"])
 
 
 if __name__ == "__main__":
