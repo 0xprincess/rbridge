@@ -59,7 +59,11 @@ def require(condition, label):
 
 
 def command(argv, *, data=None, env=None, timeout=900, allow_failure=False):
-    result = subprocess.run([str(arg) for arg in argv], input=data, capture_output=True,
+    # OpenSSH can change inherited stdin flags. Isolate noninteractive commands
+    # so a prior SSH probe cannot leave Ansible with non-blocking standard input.
+    result = subprocess.run([str(arg) for arg in argv], input=data,
+                            stdin=subprocess.DEVNULL if data is None else None,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                             env=env, timeout=timeout)
     if result.returncode and ARTIFACTS:
         (ARTIFACTS / f"subprocess-{time.time_ns()}.log").write_bytes(result.stdout + b"\nSTDERR:\n" + result.stderr)
