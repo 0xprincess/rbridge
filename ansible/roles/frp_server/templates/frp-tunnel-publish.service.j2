@@ -1,0 +1,21 @@
+# Managed by frp-tunnel; socket activation preserves native application bytes.
+[Unit]
+Description=TCP forwarding for {{ item.name }}
+BindsTo=frp-tunnel-publish-{{ item.name }}.socket
+After=frp-tunnel-publish-{{ item.name }}.socket frp-tunnel-server.service
+Wants=frp-tunnel-server.service
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:{{ item.relay_port }}
+User={{ frp_service_user }}
+Group={{ frp_service_user }}
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6
+UMask=0077

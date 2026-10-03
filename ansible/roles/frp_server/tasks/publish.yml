@@ -1,0 +1,79 @@
+---
+- name: Select only explicitly public TCP services
+  ansible.builtin.set_fact:
+    frp_tcp_services: "{{ frp_services_normalized | selectattr('protocol', 'equalto', 'tcp') | list }}"
+  no_log: true
+
+- name: Discover project-generated public listener units
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns:
+      - frp-tunnel-publish-*.socket
+      - frp-tunnel-publish-*.service
+    file_type: file
+  register: frp_publish_existing
+
+- name: Identify obsolete generated listener units
+  ansible.builtin.set_fact:
+    frp_publish_desired: "{{ (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/frp-tunnel-publish-\\1.socket') | list) + (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/frp-tunnel-publish-\\1.service') | list) }}"
+
+- name: Stop obsolete public sockets before changing FRP listeners
+  ansible.builtin.systemd_service:
+    name: "{{ item | basename }}"
+    state: stopped
+    enabled: false
+  loop: "{{ frp_publish_existing.files | map(attribute='path') | difference(frp_publish_desired) | select('search', '\\.socket$') | list }}"
+
+- name: Stop obsolete public proxy processes and their existing connections
+  ansible.builtin.systemd_service:
+    name: "{{ item | basename }}"
+    state: stopped
+  loop: "{{ frp_publish_existing.files | map(attribute='path') | difference(frp_publish_desired) | select('search', '\\.service$') | list }}"
+
+- name: Remove obsolete generated listener units
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ frp_publish_existing.files | map(attribute='path') | difference(frp_publish_desired) | list }}"
+  register: frp_publish_removed
+
+- name: Install explicit TCP socket units
+  ansible.builtin.template:
+    src: frp-tunnel-publish.socket.j2
+    dest: "/etc/systemd/system/frp-tunnel-publish-{{ item.name }}.socket"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ frp_tcp_services }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: frp_publish_sockets
+
+- name: Install unprivileged socket forwarding units
+  ansible.builtin.template:
+    src: frp-tunnel-publish.service.j2
+    dest: "/etc/systemd/system/frp-tunnel-publish-{{ item.name }}.service"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ frp_tcp_services }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: frp_publish_services
+
+- name: Reload changed generated units
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: frp_publish_removed is changed or frp_publish_sockets is changed or frp_publish_services is changed
+
+- name: Stop changed public sockets before rebinding ports
+  ansible.builtin.systemd_service:
+    name: "frp-tunnel-publish-{{ item }}.socket"
+    state: stopped
+  loop: "{{ (frp_publish_sockets.results + frp_publish_services.results) | selectattr('changed') | map(attribute='item.name') | unique | list }}"
+
+- name: Stop changed proxy processes before changing forwarding destinations
+  ansible.builtin.systemd_service:
+    name: "frp-tunnel-publish-{{ item }}.service"
+    state: stopped
+  loop: "{{ (frp_publish_sockets.results + frp_publish_services.results) | selectattr('changed') | map(attribute='item.name') | unique | list }}"
