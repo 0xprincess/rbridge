@@ -1,12 +1,4 @@
 ---
-- name: Validate the relay public key
-  ansible.builtin.assert:
-    that:
-      - frp_relay_public_key is defined
-      - "frp_relay_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"
-    fail_msg: A generated relay public key is required.
-  no_log: true
-
 - name: Create the forwarding-only relay account
   ansible.builtin.user:
     name: "{{ frp_relay_user }}"
@@ -80,6 +72,9 @@
     fail_msg: The existing SSH policy must include the project account restrictions.
   no_log: true
 
+- name: Prepare public listeners and remove stale listeners before changing FRP
+  ansible.builtin.include_tasks: publish.yml
+
 - name: Install the loopback-only FRP server configuration
   ansible.builtin.template:
     src: frps.toml.j2
@@ -89,6 +84,8 @@
     mode: "0640"
     validate: "{{ frp_binary_dir }}/frps verify -c %s"
   notify: Restart FRP server
+  no_log: true
+  diff: false
 
 - name: Install the FRP server service
   ansible.builtin.template:
@@ -108,3 +105,14 @@
     enabled: true
     state: started
     daemon_reload: true
+
+# In v0.1 FRPS itself owned the public SSH port. Flush/restart above releases it
+# before socket activation claims it during the loopback-only migration.
+- name: Enable explicit public TCP listeners after applying loopback-only FRP
+  ansible.builtin.systemd_service:
+    name: "frp-tunnel-publish-{{ item.name }}.socket"
+    enabled: true
+    state: started
+  loop: "{{ frp_tcp_services }}"
+  loop_control:
+    label: "{{ item.name }}"

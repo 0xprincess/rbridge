@@ -1,26 +1,4 @@
 ---
-- name: Validate client inputs without printing private configuration
-  ansible.builtin.assert:
-    that:
-      - frp_server_address is defined
-      - frp_server_address is match('^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$')
-      - frp_login_user is defined
-      - frp_login_user is match('^[a-z_][a-z0-9_-]{0,30}$')
-      - frp_login_user != 'root'
-      - frp_login_public_key is defined
-      - "frp_login_public_key is match('^ssh-ed25519 [A-Za-z0-9+/=]+(?: .*)?$')"
-      - frp_relay_private_key is defined
-      - frp_relay_known_hosts is defined
-      - frp_relay_known_hosts | trim | length > 0
-    fail_msg: Valid client identity, key pair, address, and verified host keys are required.
-  no_log: true
-
-- name: Require an existing login account
-  ansible.builtin.getent:
-    database: passwd
-    key: "{{ frp_login_user }}"
-  no_log: true
-
 - name: Install the relay private key
   ansible.builtin.copy:
     content: "{{ frp_relay_private_key | trim }}\n"
@@ -52,6 +30,7 @@
     mode: "0644"
   no_log: true
   diff: false
+  when: frp_managed_ssh
 
 - name: Create the OpenSSH privilege separation runtime directory
   ansible.builtin.file:
@@ -60,6 +39,7 @@
     owner: root
     group: root
     mode: "0755"
+  when: frp_managed_ssh
 
 - name: Install the isolated key-only SSH configuration
   ansible.builtin.template:
@@ -72,6 +52,7 @@
   no_log: true
   diff: false
   notify: Restart tunneled SSH
+  when: frp_managed_ssh
 
 - name: Install the FRP client configuration
   ansible.builtin.template:
@@ -82,6 +63,8 @@
     mode: "0640"
     validate: "{{ frp_binary_dir }}/frpc verify -c %s"
   notify: Restart FRP client
+  no_log: true
+  diff: false
 
 - name: Install client services
   ansible.builtin.template:
@@ -90,16 +73,55 @@
     owner: root
     group: root
     mode: "0644"
-  loop:
-    - frp-tunnel-transport.service
-    - frp-tunnel-sshd.service
-    - frp-tunnel-client.service
+  loop: "{{ ['frp-tunnel-transport.service', 'frp-tunnel-client.service'] + (['frp-tunnel-sshd.service'] if frp_managed_ssh else []) }}"
   no_log: true
   diff: false
   notify:
     - Restart tunneled SSH
     - Restart FRP transport
     - Restart FRP client
+
+- name: Inspect the previously managed SSH unit
+  ansible.builtin.stat:
+    path: /etc/systemd/system/frp-tunnel-sshd.service
+  register: frp_old_sshd_unit
+  when: not frp_managed_ssh
+
+- name: Stop the disabled managed SSH listener
+  ansible.builtin.systemd_service:
+    name: frp-tunnel-sshd.service
+    state: stopped
+    enabled: false
+  when:
+    - not frp_managed_ssh
+    - frp_old_sshd_unit.stat.exists
+
+# v0.1's dedicated unit owned /run/sshd as a RuntimeDirectory. Restore it
+# after stopping that unit so native host SSH remains usable during upgrade.
+- name: Preserve native OpenSSH runtime after removing the old managed instance
+  ansible.builtin.file:
+    path: /run/sshd
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: not frp_managed_ssh
+
+- name: Remove obsolete managed SSH configuration and unit
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/systemd/system/frp-tunnel-sshd.service
+    - /etc/frp-tunnel/sshd_config
+    - /etc/frp-tunnel/login_authorized_keys
+  when: not frp_managed_ssh
+  register: frp_removed_sshd
+
+- name: Reload systemd after removing managed SSH
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when: frp_removed_sshd is changed
 
 - name: Install the WSL keepalive helper
   ansible.builtin.template:
@@ -118,7 +140,4 @@
     enabled: true
     state: started
     daemon_reload: true
-  loop:
-    - frp-tunnel-sshd
-    - frp-tunnel-transport
-    - frp-tunnel-client
+  loop: "{{ (['frp-tunnel-sshd'] if frp_managed_ssh else []) + ['frp-tunnel-transport', 'frp-tunnel-client'] }}"

@@ -13,11 +13,17 @@ transport.tls.enable = false
 log.to = "console"
 log.level = "info"
 log.disablePrintColor = true
+webServer.addr = "127.0.0.1"
+webServer.port = {{ frp_client_admin_port }}
+webServer.user = {{ frp_admin_user | to_json }}
+webServer.password = {{ frp_admin_password | to_json }}
 
+{% for service in frp_services_normalized %}
 [[proxies]]
-name = "wsl-ssh"
+name = {{ service.name | to_json }}
 type = "tcp"
-localIP = "127.0.0.1"
-localPort = {{ frp_backend_ssh_port | int }}
-remotePort = {{ frp_public_ssh_port | int }}
+localIP = {{ service.backend_host | to_json }}
+localPort = {{ service.backend_port }}
+remotePort = {{ service.relay_port }}
 transport.useEncryption = true
+{% endfor %}

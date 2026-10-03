@@ -1,30 +1,6 @@
 ---
-- name: Validate the supported platform and configuration
-  ansible.builtin.assert:
-    that:
-      - ansible_facts['distribution'] == 'Ubuntu'
-      - ansible_facts['distribution_major_version'] | int >= 24
-      - ansible_facts['service_mgr'] == 'systemd'
-      - ansible_facts['architecture'] in frp_architectures
-      - frp_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
-      - frp_version in frp_checksums
-      - frp_checksums[frp_version][frp_architectures[ansible_facts['architecture']]] is match('^[a-f0-9]{64}$')
-      - frp_service_user is match('^[a-z_][a-z0-9_-]{0,30}$')
-      - frp_relay_user is match('^[a-z_][a-z0-9_-]{0,30}$')
-      - frp_service_user != frp_relay_user
-      - frp_service_user not in ['root', 'nobody']
-      - frp_relay_user not in ['root', 'nobody']
-      - frp_token is defined
-      - frp_token is match('^[a-f0-9]{64}$')
-      - frp_server_port | int >= 1024 and frp_server_port | int <= 65535
-      - frp_public_ssh_port | int >= 1024 and frp_public_ssh_port | int <= 65535
-      - frp_server_port | int != frp_public_ssh_port | int
-      - frp_forward_port | int >= 1024 and frp_forward_port | int <= 65535
-      - frp_backend_ssh_port | int >= 1024 and frp_backend_ssh_port | int <= 65535
-      - frp_forward_port | int != frp_backend_ssh_port | int
-      - frp_relay_ssh_port | int >= 1 and frp_relay_ssh_port | int <= 65535
-    fail_msg: Unsupported platform or invalid private deployment configuration.
-  no_log: true
+- name: Validate before changing the host
+  ansible.builtin.include_tasks: validate.yml
 
 - name: Inspect the project configuration directory
   ansible.builtin.stat:
@@ -83,6 +59,7 @@
       - ca-certificates
       - openssh-client
       - openssh-server
+      - python3-yaml
       - tar
       - util-linux
     state: present
