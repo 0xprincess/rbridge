@@ -2,6 +2,7 @@
 
 import argparse
 from contextlib import contextmanager, redirect_stdout
+import hashlib
 import importlib.util
 import io
 import json
@@ -10,6 +11,8 @@ from pathlib import Path
 import shutil
 import socket
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -312,6 +315,60 @@ class DoctorTests(unittest.TestCase):
         output = json.dumps(result)
         for secret in (private, "private-test-value", "app.example.invalid", "relay.example.invalid"):
             self.assertNotIn(secret, output)
+
+
+class BulkTests(unittest.TestCase):
+    def diagnose_output(self, output, returncode=0):
+        with tempfile.TemporaryDirectory() as folder:
+            profile = Path(folder) / "client.conf"
+            profile.write_text("Host fixture\n  HostName relay.example.invalid\n")
+            response = subprocess.CompletedProcess([], returncode, output, b"")
+            with patch.object(tunnel, "_ssh_run", return_value=response):
+                return tunnel.bulk_check(profile, "fixture", 1, 1)
+
+    def test_truncated_corrupt_and_overlong_downloads_are_not_healthy(self):
+        size = 1024 * 1024
+        body = bytes(size)
+        for data, separator, digest in (
+            (body[:-1], b"\n", hashlib.sha256(body[:-1]).hexdigest().encode()),
+            (body, b"\n", b"0" * 64),
+            (body, b"!", hashlib.sha256(body).hexdigest().encode()),
+            (body + b"x", b"\n", hashlib.sha256(body + b"x").hexdigest().encode()),
+        ):
+            with self.subTest(length=len(data), separator=separator):
+                result = self.diagnose_output(data + separator + digest)
+                self.assertFalse(result["ok"])
+                self.assertEqual(result["checks"][1]["status"], "fail")
+                self.assertNotIn("verified_bytes", result["checks"][1])
+
+    def test_complete_bytes_do_not_hide_an_ssh_exit_failure(self):
+        body = bytes(1024 * 1024)
+        result = self.diagnose_output(body + b"\n" + hashlib.sha256(body).hexdigest().encode(), 255)
+        self.assertEqual([item["status"] for item in result["checks"]], ["fail", "fail"])
+
+    def test_invalid_bulk_parameters_are_rejected_before_execution(self):
+        for host, size, timeout in (("--option", 1, 1), ("user@host", 1, 1),
+                                    ("fixture", 0, 1), ("fixture", 65, 1),
+                                    ("fixture", 1, 0), ("fixture", 1, float("nan"))):
+            with self.subTest(host=host, size=size, timeout=timeout):
+                with self.assertRaises(ValueError):
+                    tunnel.bulk_check(__file__, host, size, timeout)
+
+    @unittest.skipUnless(hasattr(os, "fork"), "Linux/WSL process-group deadline")
+    def test_deadline_kills_proxy_descendants_and_preserves_partial_output(self):
+        script = "import os,time\nchild=os.fork()\nif child: print(child,flush=True)\ntime.sleep(8)\n"
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired) as caught:
+            tunnel._ssh_run([sys.executable, "-c", script], None, 1)
+        self.assertLess(time.monotonic() - started, 4)
+        child = int(caught.exception.stdout.strip())
+        status = Path(f"/proc/{child}/stat")
+        try:
+            state = status.read_text().split()[2]
+        except (FileNotFoundError, ProcessLookupError):
+            pass  # The killed descendant has already been reaped.
+        else:
+            self.assertEqual(state, "Z")
 
 
 class GenerationTests(unittest.TestCase):

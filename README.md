@@ -1,9 +1,11 @@
 # FRP tunnel
 
 Publish web applications and TCP services from Ubuntu or Ubuntu WSL2 through a
-relay you control, without router port forwarding or a system proxy. Ansible
+relay you control, without router port forwarding. Ansible
 manages FRP over an outbound, host-pinned SSH connection; systemd reconnects it.
 Caddy publishes HTTPS, with optional Basic authentication or OIDC browser login.
+The origin-to-relay transport is direct SSH. Native SSH clients on filtered
+networks can use an [explicit SOCKS access profile](docs/operations.md#native-ssh-access-on-filtered-networks).
 
 A self-hosted alternative to Cloudflare Tunnel for publishing web apps and TCP
 services—not a replacement for Cloudflare's global network, WAF, CDN, VPN, or
@@ -36,8 +38,8 @@ flowchart LR
   forwarding-only relay account. Native host SSH remains separate.
 - Ubuntu 24.04+ / systemd roles for amd64 and arm64, checksum-pinned FRP, Caddy
   and oauth2-proxy releases, and unprivileged services.
-- Configuration validation, layered `doctor` diagnostics, and stale service
-  cleanup when removing publications.
+- Configuration validation, layered `doctor` diagnostics, native SSH bulk
+  transfer checks using explicit client profiles, and stale service cleanup.
 - Private input generation, CI deployment regressions and an optional manual
   GitHub Actions relay deployment. Windows logon startup can keep WSL alive.
 
@@ -142,6 +144,8 @@ sudo python3 scripts/tunnel.py doctor \
 Doctor distinguishes transport, registration, backend and public ingress.
 A TCP handshake is not an application health check; a Basic challenge or OIDC
 redirect does not prove an authenticated login. See [operations](docs/operations.md).
+Use `scripts/tunnel.py bulk-check --ssh-config /private/client.conf --host tunnel`
+to verify sustained native SSH upload/download from the actual client network.
 
 For WSL, run from Windows PowerShell after deployment:
 
