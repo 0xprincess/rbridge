@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
-"""Validate service configuration and diagnose an installed tunnel without changes."""
+"""Validate configuration and diagnose tunnel health, including native SSH bulk I/O."""
 
 import argparse
 import base64
+import hashlib
 import http.client
 import importlib.util
 import json
 import multiprocessing
+import os
 from pathlib import Path
+import re
+import shlex
+import signal
 import socket
 import ssl
 import subprocess
 import sys
+import time
 import tomllib
 
 import yaml
@@ -270,10 +276,99 @@ def doctor(config, services, role, timeout=3, frp_config=None):
     return {"ok": all(item["status"] == "ok" for item in checks), "role": role, "checks": checks}
 
 
+def _ssh_run(argv, data, timeout):
+    """Bound the whole SSH/ProxyCommand process group, not just the ssh parent."""
+    with subprocess.Popen(argv, stdin=subprocess.PIPE if data is not None else subprocess.DEVNULL,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True) as process:
+        try:
+            stdout, stderr = process.communicate(data, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(argv, timeout, output=stdout, stderr=stderr) from None
+        finally:
+            if process.poll() is None:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait()
+        return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
+
+
+def bulk_check(ssh_config, host, size_mib, timeout):
+    """Use a trusted native SSH profile, including its explicitly selected route."""
+    if os.name != "posix":
+        raise ValueError("Run bulk-check inside Linux or WSL.")
+    if not 1 <= size_mib <= 64:
+        raise ValueError("--size-mib must be between 1 and 64.")
+    if not 0.1 <= timeout <= 600:
+        raise ValueError("--timeout must be between 0.1 and 600 seconds.")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", host):
+        raise ValueError("--host must be an SSH Host alias, without a user prefix or options.")
+    path = Path(ssh_config).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError("Cannot read the private SSH configuration.")
+    ssh = ["ssh", "-F", str(path), "-T", "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes",
+           "-o", "Compression=no", "-o", "ControlPath=none", "-o", "ClearAllForwardings=yes",
+           "-o", "ForwardAgent=no", "-o", "PermitLocalCommand=no", "--", host]
+    size = size_mib * 1024 * 1024
+    payload = os.urandom(size)
+    expected = hashlib.sha256(payload).hexdigest().encode()
+    # The remote stream carries a SHA-256 trailer; no remote temporary file or
+    # compressible zero stream can turn a short download into a successful check.
+    download = f"""import hashlib,os,sys
+remaining={size}
+digest=hashlib.sha256()
+while remaining:
+    chunk=os.urandom(min(remaining,65536))
+    digest.update(chunk)
+    sys.stdout.buffer.write(chunk)
+    remaining-=len(chunk)
+sys.stdout.buffer.write(b'\\n'+digest.hexdigest().encode())
+sys.stdout.buffer.flush()
+"""
+    checks = []
+    for direction, command, data in (("upload", "sha256sum", payload),
+                                     ("download", "python3 -c " + shlex.quote(download), None)):
+        started = time.monotonic()
+        success = False
+        try:
+            response = _ssh_run(ssh + [command], data, timeout)
+            if response.returncode:
+                message = "SSH command failed (exit " + str(response.returncode) + ")."
+            else:
+                if direction == "upload":
+                    success = response.stdout.split() == [expected, b"-"]
+                else:
+                    body = memoryview(response.stdout)
+                    success = (len(body) == size + 65 and body[size] == 10 and
+                               hashlib.sha256(body[:size]).hexdigest().encode() == response.stdout[-64:])
+                message = "Verified " + str(size) + " bytes end to end." if success else "Transfer length or SHA-256 verification failed."
+        except subprocess.TimeoutExpired:
+            message = "Bulk transfer exceeded its wall-clock deadline; no successful transfer is claimed."
+        except OSError:
+            message = "Cannot execute the native SSH client."
+        action = "" if success else (
+            "Check the private SSH profile, key and pinned backend host key; the backend needs sha256sum and Python 3. "
+            "A login or TCP handshake alone does not prove bulk transfer. For a normal-mode desktop proxy, "
+            "select its SOCKS route explicitly with ProxyCommand and compare the same check.")
+        item = check(direction, "ok" if success else "fail", message, action)
+        item["seconds"] = round(time.monotonic() - started, 3)
+        if success:
+            item["verified_bytes"] = size
+        checks.append(item)
+    return {"ok": all(item["status"] == "ok" for item in checks), "checks": checks}
+
+
 def parser():
     result = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter, epilog="""Run from the repository on the installed Linux client or relay (Python 3.11+, PyYAML):
   python3 scripts/tunnel.py validate --config /private/services.yml --config /private/secrets.yml
   sudo python3 scripts/tunnel.py doctor --config /private/services.yml --role client --json
+  python3 scripts/tunnel.py bulk-check --ssh-config /private/client.conf --host tunnel --size-mib 16 --json
   sudo python3 scripts/tunnel.py doctor --config /private/services.yml --role server --json
 Use flat Ansible variables, not inventory.yml. Repeated --config files overlay in order.
 The installed /etc/frp-tunnel/frpc.toml or frps.toml supplies loopback admin credentials.
@@ -288,6 +383,10 @@ Any failed or unknown check makes doctor exit nonzero, including healthy generic
 services checked on the server.
 Public checks use this machine's network; repeat externally to detect ingress firewall issues.
 An 'ok' TCP check proves a handshake only, not backend/application health.
+bulk-check runs authenticated upload/download commands through a trusted native SSH profile.
+It requires sha256sum and Python 3 on the backend, verifies random data in both directions,
+disables connection reuse/compression, and does not retry failed checks.
+Normal-mode desktop proxies do not route OpenSSH automatically; use an explicit ProxyCommand.
 Logs (review privately; journals may contain endpoints):
   """ + LOGS["client"] + "\n  " + LOGS["server"])
     commands = result.add_subparsers(dest="command", required=True)
@@ -299,20 +398,29 @@ Logs (review privately; journals may contain endpoints):
             command.add_argument("--role", required=True, choices=("client", "server"), help="Role installed on the machine running this command")
             command.add_argument("--frp-config", metavar="FILE", help="Installed FRP TOML override (default /etc/frp-tunnel/frpc.toml or frps.toml)")
             command.add_argument("--timeout", type=float, default=3, help="Per-check wall-clock deadline in seconds, including DNS (0.1–30; default 3)")
+    bulk = commands.add_parser("bulk-check", help="Verify native SSH upload/download through an explicit SSH profile")
+    bulk.add_argument("--ssh-config", required=True, metavar="FILE", help="Trusted private OpenSSH config with identity, user, port and backend host pin")
+    bulk.add_argument("--host", required=True, help="Host alias from that SSH config; its ProxyCommand selects direct or SOCKS access")
+    bulk.add_argument("--size-mib", type=int, default=16, help="Random bytes per direction in MiB (1–64; default 16)")
+    bulk.add_argument("--timeout", type=float, default=30, help="Per-direction wall-clock deadline in seconds (0.1–600; default 30)")
+    bulk.add_argument("--json", action="store_true", help="Emit safe machine-readable results without SSH output or endpoints")
     return result
 
 
 def main(argv=None):
     arguments = parser().parse_args(argv)
     try:
-        if arguments.command == "doctor" and not 0.1 <= arguments.timeout <= 30:
-            raise ValueError("--timeout must be between 0.1 and 30 seconds.")
-        config = load_config(arguments.config)
-        services = validate_config(config)
-        if arguments.command == "validate":
-            result = {"ok": True, "service_count": len(services)}
+        if arguments.command == "bulk-check":
+            result = bulk_check(arguments.ssh_config, arguments.host, arguments.size_mib, arguments.timeout)
         else:
-            result = doctor(config, services, arguments.role, arguments.timeout, arguments.frp_config)
+            if arguments.command == "doctor" and not 0.1 <= arguments.timeout <= 30:
+                raise ValueError("--timeout must be between 0.1 and 30 seconds.")
+            config = load_config(arguments.config)
+            services = validate_config(config)
+            if arguments.command == "validate":
+                result = {"ok": True, "service_count": len(services)}
+            else:
+                result = doctor(config, services, arguments.role, arguments.timeout, arguments.frp_config)
     except ValueError as error:
         result = {"ok": False, "error": str(error)}
         print(json.dumps(result) if arguments.json else "Invalid configuration: " + result["error"])

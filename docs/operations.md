@@ -59,6 +59,87 @@ TCP/HTTP GET probes; `--timeout` controls each probe's wall-clock deadline,
 including DNS. Public checks originate from the machine running doctor, so
 repeat from an external client network to detect ingress firewall/filtering issues.
 
+## Native SSH access on filtered networks
+
+The public client-to-relay connection and the origin-to-relay SSH transport are
+different network legs. Successful login, `doctor`, or a transfer between VPSs
+does not establish that bulk traffic works from the workstation.
+
+v2rayN in **normal system-proxy mode, not TUN**, does not automatically route
+OpenSSH. Browsers may use the proxy while `ssh` remains direct. Choose the
+route explicitly in a private OpenSSH profile; do not change global routing,
+weaken host-key checking, or silently fall back to direct access.
+
+Example `/private/tunnel/client.conf` (replace the host, user, port and paths):
+
+```sshconfig
+Host tunnel-direct
+    ProxyCommand none
+
+Host tunnel-proxied
+    ProxyCommand /usr/bin/nc -X 5 -x 127.0.0.1:10808 %h %p
+
+Host tunnel-direct tunnel-proxied
+    HostName relay.example.invalid
+    Port 2222
+    User developer
+    IdentityFile /private/tunnel/login_id_ed25519
+    UserKnownHostsFile /private/tunnel/login_known_hosts
+    GlobalKnownHostsFile /dev/null
+    StrictHostKeyChecking yes
+    IdentityAgent none
+    IdentitiesOnly yes
+    ProxyJump none
+    ConnectTimeout 10
+    ServerAliveInterval 15
+    ServerAliveCountMax 3
+```
+
+The login host pin must be the **origin SSH server's** independently verified
+key, indexed under the relay's published address and port—not the relay's
+administrative host key. The profile and keys stay outside the checkout.
+The SOCKS example requires OpenBSD netcat (`netcat-openbsd` on Ubuntu) and a
+reachable local SOCKS5 listener. `10808` is an example, not an auto-detected
+setting. Mirrored WSL can reach a Windows loopback listener; verify reachability
+instead of assuming NAT-mode WSL uses the same address. Do not expose an
+unauthenticated SOCKS listener to an untrusted network.
+
+Use the selected profile for ordinary SSH, SCP and SFTP:
+
+```bash
+ssh -F /private/tunnel/client.conf tunnel-proxied
+scp -F /private/tunnel/client.conf ./file tunnel-proxied:destination
+sftp -F /private/tunnel/client.conf tunnel-proxied
+```
+
+Check that exact route from the workstation, rather than substituting a VPS:
+
+```bash
+python3 scripts/tunnel.py bulk-check \
+  --ssh-config /private/tunnel/client.conf --host tunnel-proxied \
+  --size-mib 16 --timeout 60 --json
+```
+
+`bulk-check` authenticates and executes bounded, file-free transfer commands.
+The backend needs `sha256sum` and Python 3, already present in the supported
+deployment. Both directions carry random data and verify length/SHA-256.
+Each uses a fresh SSH connection without compression or connection reuse.
+Failures are not retried or replaced with a successful handshake. JSON reports
+`upload` and `download` checks, elapsed seconds, and verified byte counts only
+on success. Exit codes are 0 for both directions verified, 1 for any failure,
+and 2 for invalid arguments. The deadline also terminates SSH proxy descendants.
+
+For diagnosis, compare the same command with `--host tunnel-direct`. A proxy
+success and direct failure localize a route-dependent problem; they do not,
+alone, identify a DPI product or rule. Capture TCP retransmissions/ACKs and
+backend byte counts privately to distinguish network blackholing from a
+backend waiting for EOF. Increasing timeouts, disabling host checks, or changing
+SSH QoS blindly is not a repair.
+
+This profile changes **public native SSH access only**. The managed
+`frp-tunnel-transport` and administrative Ansible connections remain direct;
+do not assume this profile reroutes either one.
+
 ## Services and logs
 
 On the relay:
@@ -139,7 +220,7 @@ dependencies or keepalive can restart individual units if you leave the rest run
 | HTTPS backend returns 502 | Backend availability, relay OS CA trust and backend URL hostname matching certificate |
 | OIDC discovery/readiness fails | HTTPS issuer accessibility/trust and provider configuration; bootstrap a tunneled issuer first |
 | OIDC login denied | Exact callback, client secret, verified email, configured email/domain restrictions, PKCE support |
-| Transfer stalls only on one network | Compare real payloads from another network and direct administration SSH; filtering may be path-dependent |
+| Transfer stalls only on one network | Run `bulk-check` from that workstation with explicit direct/proxied profiles; compare TCP loss and backend byte counts, not just login or VPS-to-VPS results |
 | Host fingerprint changes | Verify independently before updating the pin; never disable host checking |
 | WSL exits | Windows task state, correct distribution, enabled systemd and installed keepalive |
 

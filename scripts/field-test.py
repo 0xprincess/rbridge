@@ -27,7 +27,6 @@ and remove that directory; never use this option against shared hosts.
 import argparse
 import base64
 import copy
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -61,10 +60,16 @@ def require(condition, label):
 def command(argv, *, data=None, env=None, timeout=900, allow_failure=False):
     # OpenSSH can change inherited stdin flags. Isolate noninteractive commands
     # so a prior SSH probe cannot leave Ansible with non-blocking standard input.
-    result = subprocess.run([str(arg) for arg in argv], input=data,
-                            stdin=subprocess.DEVNULL if data is None else None,
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            env=env, timeout=timeout)
+    try:
+        result = subprocess.run([str(arg) for arg in argv], input=data,
+                                stdin=subprocess.DEVNULL if data is None else None,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=env, timeout=timeout)
+    except subprocess.TimeoutExpired as error:
+        if ARTIFACTS:
+            (ARTIFACTS / f"timeout-{time.time_ns()}.log").write_bytes(
+                (error.stdout or b"") + b"\nSTDERR:\n" + (error.stderr or b""))
+        raise
     if result.returncode and ARTIFACTS:
         (ARTIFACTS / f"subprocess-{time.time_ns()}.log").write_bytes(result.stdout + b"\nSTDERR:\n" + result.stderr)
     if result.returncode and not allow_failure:
@@ -136,6 +141,12 @@ class Suite:
         (self.folder / "relay_known_hosts").write_text(relay_hosts)
         host = self.remote("client", "cat /etc/ssh/ssh_host_ed25519_key.pub").stdout.decode().split()
         (self.folder / "login_known_hosts").write_text(f"[{self.address}]:2222 {host[0]} {host[1]}\n")
+        (self.folder / "client.conf").write_text(
+            f"Host field-tunnel\n  HostName {self.address}\n  Port 2222\n"
+            f"  User {self.args.user}\n  IdentityFile {self.folder / 'login.key'}\n"
+            f"  UserKnownHostsFile {self.folder / 'login_known_hosts'}\n"
+            "  GlobalKnownHostsFile /dev/null\n  IdentityAgent none\n"
+            "  IdentitiesOnly yes\n  ProxyCommand none\n  ProxyJump none\n")
         password = base64.urlsafe_b64encode(os.urandom(24)).decode()
         self.password = password
         self.login_password = base64.urlsafe_b64encode(os.urandom(24)).decode()
@@ -287,11 +298,9 @@ class Suite:
         probe = command(argv + ["printf field-ok"], timeout=15)
         require(probe.stdout == b"field-ok", "Native key-only SSH failed")
         payload = os.urandom(1024 * 1024)
-        digest = hashlib.sha256(payload).hexdigest()
-        uploaded = command(argv + ["sha256sum"], data=payload, timeout=30)
-        require(uploaded.stdout.decode().split()[0] == digest, "SSH upload corrupted")
-        downloaded = command(argv + ["head -c 1048576 /dev/zero"], timeout=30)
-        require(downloaded.stdout == bytes(1024 * 1024), "SSH download corrupted")
+        command([sys.executable, ROOT / "scripts/tunnel.py", "bulk-check",
+                 "--ssh-config", self.folder / "client.conf", "--host", "field-tunnel",
+                 "--size-mib", "1", "--timeout", "30", "--json"], timeout=70)
         rejected = command(argv[:-1] + ["-o", "PubkeyAuthentication=no", "-o",
                            "PreferredAuthentications=password,keyboard-interactive", argv[-1], "true"],
                            timeout=15, allow_failure=True)
