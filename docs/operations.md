@@ -136,6 +136,12 @@ backend byte counts privately to distinguish network blackholing from a
 backend waiting for EOF. Increasing timeouts, disabling host checks, or changing
 SSH QoS blindly is not a repair.
 
+On Windows, also compare native Windows OpenSSH with WSL against the same
+endpoint. If only WSL stalls, keep that distinction in the diagnosis rather
+than declaring the relay port generally blocked. A successful native Windows
+transfer does not establish that the WSL path works. Neither changing SSH QoS
+nor lowering MSS should be treated as a fix without repeating the byte checks.
+
 This profile changes **public native SSH access only**. The managed
 `frp-tunnel-transport` and administrative Ansible connections remain direct;
 do not assume this profile reroutes either one.
