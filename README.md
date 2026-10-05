@@ -13,9 +13,9 @@ identity platform. You provision, secure, and pay for the relay. Native TCP
 clients need no tunnel-specific software.
 
 See the [Cloudflare Tunnel and Tailscale comparison](docs/comparison.md) for
-source-linked product limits, published benchmarks, and measured throughput,
-latency, resource use and recovery on a temporary Hetzner deployment. The results
-distinguish access paths and are not a controlled three-product speed ranking.
+matched project/Cloudflare Quick Tunnel measurements of throughput, latency,
+resource use and recovery on temporary Hetzner VPSs, plus separately sourced
+Tailscale benchmarks. Different access paths prevent a universal speed ranking.
 
 The [`v0.1` release](https://github.com/0xprincess/frp-tunnel/releases/tag/v0.1)
 preserves the complete SSH-only baseline. Generalized publishing is developed on

@@ -1,256 +1,318 @@
 # Cloudflare Tunnel and Tailscale comparison
 
-Research and project measurements: **2026-10-05**. Project revision:
-[`d216bdb`](https://github.com/0xprincess/frp-tunnel/commit/d216bdb705a7b4bf6eb653fce7504fca480bd6d7).
+Measured **2026-10-05** using project revision
+[`2ca728a`](https://github.com/0xprincess/frp-tunnel/commit/2ca728a8c3a489368cba406fbc86a1e66a00e38d)
+and **cloudflared 2026.9.3**. FRP and Cloudflare **Quick Tunnel** were exercised
+against the same backends from the same visitor on the same temporary VPS pair.
+Tailscale was **not** installed; its published results are separate below.
 
-**This is not a controlled three-product benchmark.** Only FRP tunnel was
-installed and measured here. The alternatives' figures below are published
-observations or documented limits, explicitly labeled. Different CPUs, network
-paths, protocols and dates prevent a numerical performance ranking.
+**These are real measurements, not universal speed ratings.** Quick Tunnel is
+not a named production tunnel. The visitor ran on the FRP relay, so FRP ingress
+was local while Cloudflare traversed its edge network. This measures those
+specific paths, not equal-distance transports or typical Internet-user latency.
 
-Cloudflare public-hostname Tunnel, Tailscale private direct/relayed connectivity,
-and Tailscale public Funnel are different access paths. In particular, a direct
-WireGuard benchmark does not measure Funnel or DERP, and a CDN cache hit does
-not measure a request through Cloudflare Tunnel to an origin.
+[Sanitized evidence](benchmark-results/2026-10-05-quick-tunnel.json) contains
+18 TCP trials, 1,500 timed echo samples, 200 HTTPS requests, 12 verified HTTPS
+bulk transfers, 12 verified SSH transfers, 600 resource samples, ten interruption
+trials and one Quick Tunnel process-restart check. Timed transfers completed
+without failed records. Interruption-induced failures are recorded, not hidden.
+Addresses, assigned hostnames, identities, keys and private logs are excluded.
 
-## Critical metrics: observed versus reported
+## Matched transport measurements
 
-“Not reported” means **not reported in the reviewed sources**, not zero,
-unlimited, or a claim that nobody has ever measured it.
+Paths, with a separate origin VM in every case:
 
-| Metric | FRP tunnel: measured here | Cloudflare Tunnel: reported evidence | Tailscale: reported evidence |
+- **Direct control:** visitor on relay → origin's direct fixture listener.
+- **FRP:** same visitor → relay-local public socket → FRPS → persistent outbound
+  OpenSSH transport → FRPC → origin backend. HTTPS additionally uses Caddy.
+- **Quick Tunnel:** same visitor → client `cloudflared` for TCP/SSH, or ordinary
+  HTTPS → Cloudflare edge → origin `cloudflared` → the **same backend**.
+  Its public TCP/SSH path is TLS WebSocket transport, not a native public socket.
+
+TCP throughput is receiver goodput in decimal Mbit/s: one stream, Cubic,
+30 timed seconds after three omitted warm-up seconds, three trials per direction
+and path. Each repetition interleaved direct/FRP/Quick upload, then their
+reverse-direction downloads. Cells show **median [minimum–maximum]**.
+
+| Metric | Direct control | FRP tunnel | Cloudflare Quick Tunnel |
 | --- | --- | --- | --- |
-| Sustained TCP receiver goodput | Median **1.460 Gbit/s upload / 1.807 Gbit/s download**, relay-local visitor to separate origin; three trials per direction. | No reproducible public-hostname TCP/SSH benchmark found in the reviewed primary sources. Historical community downloads are discussed below, not treated as a product rating. | **13.0 Gbit/s** bare-metal / **7.29 Gbit/s** AWS optimized **wireguard-go dataplane** benchmark [T1]. A separate field report found **2.20 Mbit/s DERP / 27.5 Mbit/s Peer Relay** [T2]. Neither measures Funnel; these are different workloads and routes. |
-| Application latency | 1 KiB echo **1.947 ms p50 / 2.509 ms p95**; fresh HTTPS total **51.182 / 53.921 ms**. No Internet visitor leg. | No equivalent echo or uncached HTTPS latency distribution reported in reviewed primary sources. | Diagnostic pings **441–478 ms DERP**, then **306/298 ms Peer Relay** [T2]. Different routes, not application percentiles or protocol overhead. |
-| Process RSS, sampled peak | Idle relay/origin **89.74 / 31.12 MiB**; peaks across the two load windows **111.39 / 42.78 MiB**. Full accounting below. | No comparable measured footprint reported. The **4 GB RAM / 4 CPU cores per host**, two-host recommendation [C1] is capacity guidance, **not observed cloudflared consumption**. | No comparable Linux daemon idle/load RSS benchmark reported in reviewed sources. |
-| Process CPU | Idle relay/origin **0.067% / 0.017%**. Upload load **172.45% / 106.94%**; download load **171.59% / 118.22%**. **100% = one core**. | No comparable measured process-CPU result reported in reviewed primary sources. | No comparable daemon CPU result reported in reviewed sources; iperf's own CPU percentage is not daemon accounting. |
-| Transport restart → verified new response | **2.219 s median**, **2.173–2.278 s** range, five explicit origin-transport restarts. Existing connection broke **5/5** times. | Not reported. Four connections and retry backoff are architecture/configuration, not a recovery measurement [C2][C3]. | Not reported for an equivalent controlled failure. Funnel performance and recovery distributions are also not reported [T3]. |
+| TCP upload, Mbit/s | **5,585.39 [5,577.40–6,288.68]** | **2,479.09 [2,428.59–2,486.00]** | **292.08 [281.56–303.41]** |
+| TCP download, Mbit/s | **8,862.02 [8,749.45–8,924.36]** | **2,306.14 [2,246.54–2,322.56]** | **725.65 [704.85–762.18]** |
+| Persistent 1 KiB echo, p50 / p95, ms | **0.511 / 0.742** | **1.362 / 1.918** | **29.614 / 30.332** |
 
-### What the published throughput numbers actually measured
+Quick Tunnel's TCP and SSH behavior was verified with actual payloads, not
+inferred from a listening port or connector registration. Each echo path had
+500 checked responses after 20 excluded warm-ups, with a 10 ms pause between
+exchanges. No timed samples were discarded. These values exclude TCP setup.
 
-- **[T1], 2023-04-13:** single-stream TCP, iperf 3.9, Cubic, 10 seconds,
-  no omitted warm-up, 128 KiB blocks. Two Ubuntu 22.04 i5-12400 systems with
-  25-Gbit/s Mellanox NICs connected by DAC, or two AWS c6i.8xlarge instances in
-  `us-east-2b`. Linux kernels 5.15.0-69 and 5.19.0-1022-aws respectively.
-  The article tests wireguard-go optimizations being incorporated into Tailscale
-  v1.40, not a benchmark of a released v1.40 daemon. Its 0.035/0.126 ms average
-  pings are **underlay baselines**, not Tailscale latency overhead.
-- **[T2], 2026-01-26:** 120-second iperf3 TCP observations between Delhi and
-  Robbinsdale, Minnesota. Chicago DERP versus a residential-fiber Peer Relay.
-  Exact software versions, endpoint hardware, repeat count and reverse-direction
-  results are not supplied. This predates the 2026-02-18 Peer Relay GA
-  announcement [T4]; do not relabel it as a current-release benchmark.
-- **[C8], 2023-09-09 community comment:** a 1 GB download reportedly reached
-  **149/89 MB/s direct**, **152/94 MB/s through HTTP/2 Tunnel**, and **17/17 MB/s
-  through QUIC Tunnel**, on two unspecified hosts. Units are quoted as reported.
-  Hardware, route, cache status, repetition count and that commenter's version
-  are unspecified. The issue opener's environment is not the commenter's
-  environment. This is historical, uncontrolled evidence that transport choice
-  can matter—not a vendor benchmark or an expected rate.
+### HTTPS and native SSH
 
-## Observed project measurements
+HTTPS used fresh HTTP/1.1/TLS connections, verified certificates, unique query
+nonces and an origin `Cache-Control: no-store` response. All 100 Quick HTTPS
+latency responses reported **`CF-Cache-Status: DYNAMIC`** and visitor edge
+**`CDG`**. They were not CDN cache-hit measurements. Both products returned the
+exact same **1,088-byte** body in all 100 requests each.
 
-The visitor for these same-site measurements ran **on the relay**. The published
-path still traversed the real socket proxy or Caddy, FRPS, the encrypted
-origin-to-relay SSH transport, FRPC, and the separate origin backend. It did
-**not** include a remote visitor's Internet leg. The direct control connected
-from relay to origin without FRP/SSH. These are deployment observations, not
-maximum capacities or an Internet-access SLA.
-
-[Sanitized measurements](benchmark-results/2026-10-05-hetzner.json) retain all
-12 throughput trials, 1,000 timed echo samples, 100 HTTPS timings, 360 resource
-samples, 12 verified SSH transfers, the HTTP upload result and five restarts.
-Deployment addresses, account identifiers, keys, inventories and raw private
-logs are intentionally excluded.
-
-| Metric | FRP tunnel observation | Same-host-pair direct control |
+| Metric | FRP tunnel | Cloudflare Quick Tunnel |
 | --- | --- | --- |
-| Single-stream TCP upload, receiver median [range], 3 runs | **1,459.50 [1,448.07–1,510.66] Mbit/s** | **8,175.05 [7,500.42–8,687.57] Mbit/s** |
-| Single-stream TCP download, receiver median [range], 3 runs | **1,807.08 [1,726.93–1,838.86] Mbit/s** | **7,491.19 [7,071.64–7,598.07] Mbit/s** |
-| Persistent 1 KiB TCP echo, p50 / p95 | **1.947 / 2.509 ms**; 500 verified responses | **0.601 / 0.762 ms**; 500 verified responses |
-| Fresh HTTPS 1,088-byte response, p50 / p95 total | **51.182 / 53.921 ms**; 100 correct HTTP 200 responses | Not measured with equivalent TLS |
-| Fresh HTTPS time to first byte, p50 / p95 | **10.261 / 13.518 ms**; same 100 requests, measured from curl start | Not measured with equivalent TLS |
-| Native SSH, 64 MiB per direction, median effective upload / download | **533.14 / 254.68 Mbit/s**, three verified transfers each direction | Not measured; includes SSH startup and verification work |
-| Single HTTPS POST body | **128 MiB (134,217,728 bytes)**, HTTP 200, SHA-256 verified; **0.851 s**, one request | Not a maximum-size or sustained-throughput measurement |
+| Fresh HTTPS time to first byte, p50 / p95, ms | **6.262 / 9.601** | **124.583 / 158.739** |
+| Fresh HTTPS total time, p50 / p95, ms | **6.386 / 9.785** | **124.821 / 158.906** |
+| Verified 8 MiB HTTPS upload / download, median effective Mbit/s | **689.38 / 1,194.60** | **160.20 / 300.08** |
+| Verified 64 MiB SSH upload / download, median effective Mbit/s | **651.54 / 521.74** | **211.37 / 300.60** |
 
-### Resource use under a defined load
+Bulk results comprise three transfers **per direction per product**. Every
+transfer passed exact byte-count and SHA-256 checks. All HTTPS bulk requests
+returned HTTP 200. These are bounded payload rates, not sustained wire speed:
+TLS/SSH setup, command execution and verification affect them. SSH used the
+project's unmodified `bulk-check`, fresh connections, no compression or reuse,
+and the same origin SSH server/key for both routes. Timed SSH download includes
+remote random generation and local hashing; upload excludes local generation.
+HTTPS upload read a pregenerated file; download served a pregenerated random
+8 MiB file and was checked afterward. No Quick maximum-body-size claim is made.
 
-| Window | Relay CPU, % of one core | Origin CPU, % of one core | Relay peak RSS, MiB | Origin peak RSS, MiB | Load receiver goodput, Mbit/s |
+## Measured resource use
+
+Each row is a separate **60-second** window, sampled once per second. CPU is
+time-weighted process CPU time / elapsed wall time; **100% = one logical core**,
+so values over 100% are legitimate on these two-vCPU VMs. RSS is summed process
+RSS, not total VM RAM, PSS, Go heap, or cgroup memory; shared pages may be counted
+more than once. Peak RSS is the largest sampled simultaneous sum, including the
+initial snapshot. Whole-VM CPU steal was zero in these sampled windows.
+
+| Deployment / window | Load receiver Mbit/s | Visitor/relay CPU % | Origin CPU % | Visitor/relay peak RSS, MiB | Origin peak RSS, MiB |
 | --- | --- | --- | --- | --- | --- |
-| Warmed idle, 60 s | 0.067 | 0.017 | 89.74 | 31.12 | No offered benchmark traffic |
-| Single-stream upload, 60 s | 172.45 | 106.94 | 111.39 | 35.79 | 1,421.72 |
-| Single-stream download, 60 s | 171.59 | 118.22 | 105.89 | 42.78 | 1,858.86 |
+| FRP, warmed idle | No benchmark load | 0.017 | 0.050 | 89.76 | 30.75 |
+| Quick, warmed idle | No benchmark load | 0.000 | 0.317 | 110.70 | 167.25 |
+| FRP, single-stream upload | 2,444.48 | 158.03 | 164.51 | 122.70 | 42.03 |
+| FRP, single-stream download | 2,246.04 | 143.81 | 171.95 | 116.83 | 43.13 |
+| Quick, single-stream upload | 271.72 | 5.60 | 68.45 | 108.96 | 171.74 |
+| Quick, single-stream download | 619.25 | 56.79 | 97.74 | 113.62 | 174.43 |
 
-These load windows are separate from the three 30-second throughput trials.
-They show substantial CPU demand at the measured rates, not the capacity to
-sustain those rates while also running a production application on the same VM.
+Accounting boundaries matter:
 
-### External workstation and recovery checks
+- **FRP:** all running `frp-tunnel-*.service` processes, including Caddy, FRPS,
+  FRPC, active socket proxies, SSH transport and managed SSH daemon, plus both
+  privileged/unprivileged relay transport sshd processes outside those cgroups.
+- **Quick:** **four separate origin connectors** (HTTP, iperf, echo, SSH) and
+  **three visitor access clients** (iperf, echo, SSH), with one stream loaded at
+  a time. The table sums this configured deployment, **not one cloudflared
+  daemon**. Evidence retains per-unit CPU/RSS for alternate accounting.
+- Quick origin connectors each had **one active QUIC edge connection**, observed
+  in registration logs and metrics. A named tunnel can multiplex publications
+  through one connector and normally uses four edge connections; do not apply
+  this Quick process count or footprint to it [C2], [Q2].
+- Fixtures, iperf, curl, administrative SSH and sampler processes are excluded.
+  Kernel work outside counted processes and **Cloudflare's edge infrastructure**
+  are also excluded. A zero sampled CPU value means no accounted CPU-tick delta,
+  not zero operating-system work. Very short-lived processes can be missed.
+- Idle followed application preflights; not every socket-activated FRP publication
+  had been used yet. The loaded windows followed the transfer tests. Collectors
+  and load were launched concurrently; small startup offsets are included.
 
-- The actual WSL workstation used the documented
-  [explicit SOCKS5 SSH profile](operations.md#native-ssh-access-on-filtered-networks).
-  **Three 32 MiB uploads and three 32 MiB downloads** passed exact byte-count
-  and SHA-256 checks. Median effective rates were **161.32 / 122.41 Mbit/s**;
-  ranges **160.84–165.29 / 116.41–126.86 Mbit/s**. This includes the workstation,
-  proxy route and Internet leg, so it must not be pooled with relay-local trials.
-  The proxy's egress route was not characterized. No direct-WSL success is claimed.
-- Five `systemctl restart frp-tunnel-transport` operations ran on the origin.
-  Here the **probe also ran on the origin**, connecting to the relay's public
-  echo publication and returning through the tunnel. Elapsed times from just
-  before invoking systemctl to the first verified new response were
-  **2.219, 2.276, 2.176, 2.278, 2.173 seconds**. The command itself returned in
-  about 0.032 s; that was **not** recovery. Each pre-existing connection failed.
-  New probes used a 0.2 s socket timeout and a 0.1 s pause after failure, after
-  checking the old connection with a 1 s timeout. These are observed recovery
-  bounds at that cadence, not exact outage durations. No blackholed link, relay
-  reboot, host loss, uptime SLA or session-preserving failover was measured.
+The offered workload was one saturating stream, **not equal achieved throughput**.
+The lower Quick CPU numbers therefore do not establish better CPU efficiency;
+the public edge's CPU cost is unknown. Likewise, Cloudflare's published
+4-CPU/4-GB deployment guidance [C1] is not a measured daemon footprint.
 
-### Environment and measurement definitions
+## Interruption and process-restart behavior
 
-- Two newly provisioned **Hetzner CX23** VMs in **Nuremberg (`nbg1`)**, each
-  with **2 shared vCPUs and 4 GB advertised RAM**. The relay exposed an Intel
-  Xeon Skylake CPU model; the origin exposed AMD EPYC-Rome. Shared placement and
-  CPU model differences limit reproducibility even with the same instance type.
-- Both ran **Ubuntu 24.04.4 LTS**, Linux **6.8.0-138-generic**, **FRP 0.71.0**,
-  **OpenSSH 9.6p1 Ubuntu-3ubuntu13.18**, and **iperf 3.16**. Relay web ingress
-  used **Caddy 2.11.7**. Stock project roles and transport settings; no special
-  performance tuning. Native public SSH, TCP echo, iperf and public-policy HTTPS
-  were configured. No OIDC or Basic authenticator was included in the footprint.
-- Echo: a single persistent socket, 1,024 bytes sent and checked per response;
-  20 warm-up exchanges excluded, followed by 500 samples with a 10 ms pause
-  between exchanges. Client `TCP_NODELAY` enabled. Timing excludes connection
-  establishment. p50 is the ordinary median; p95 is nearest-rank
-  `sorted_samples[ceil(0.95*n)-1]`. No timed samples were discarded.
-- HTTPS: 100 separate curl processes and fresh HTTP/1.1/TLS connections;
-  hostname resolved explicitly to relay loopback. Caddy's internal CA was
-  explicitly trusted—no insecure TLS switch. Each origin response was 1,088
-  checked bytes with `Cache-Control: no-store`; no CDN, DNS lookup, browser,
-  public-ACME issuance, authentication flow or Internet visitor leg was timed.
-- Throughput: one iperf3 TCP stream, Cubic, **30 timed seconds after 3 omitted
-  warm-up seconds**, three trials per direction/path. Each repetition alternated
-  direct/published upload, then direct/published download; no simultaneous load.
-  Upload means visitor on relay → origin; download means origin → visitor.
-  Receiver goodput is `received_bytes * 8 / receiver_seconds / 1e6` Mbit/s.
-  This is not SSH file-copy speed, and iperf CPU utilization is not full tunnel
-  CPU accounting. Recorded retransmissions describe the iperf TCP connection,
-  not all packets or retransmissions of the outer SSH transport.
-  iperf reported an initial TCP MSS of 1,448 bytes for direct trials and 32,768
-  bytes for the published loopback entry; socket termination and MSS therefore
-  also differ. This is a full deployment comparison, not isolated FRP overhead.
-- Resources: 60-second windows, sampled once per second. Sum RSS and CPU ticks
-  of processes in project `frp-tunnel-*.service` cgroups, **plus the relay's
-  restricted transport sshd processes**. This includes Caddy, FRP, active socket
-  proxies, origin SSH transport and managed SSH daemon. RSS can double-count
-  shared pages; it is not PSS, Go heap size, cgroup memory or total VM RAM.
-  CPU is process CPU-time delta / wall time; 100% means one logical core, not
-  the entire two-core VM. Backend fixtures, iperf, curl, administrative SSH and
-  kernel work outside those processes are excluded. Idle was sampled after
-  echo/HTTPS requests; unused socket-activated services need not yet be running.
-  CPU means are time-weighted over each window. Upload/download load used one
-  60-second iperf stream, with collectors and load launched concurrently;
-  small remote-start timing differences are included in the windows.
-- SSH: the repository's unmodified `bulk-check` used fresh pinned OpenSSH
-  connections, compression and reuse disabled, with random payloads and
-  byte-count/SHA-256 verification. Timed upload excludes local payload generation;
-  timed download includes remote random generation, transfer and local hashing.
-  Both include SSH startup/authentication and remote command execution.
-  These effective payload rates are not isolated wire speed or disk-copy rates.
-- The 128 MiB HTTP request was generated before timing and uploaded from a
-  temporary file. The origin streamed its length and SHA-256 into a small
-  response; curl verified TLS and HTTP status, and the controller checked both
-  returned values. Success proves this body size on this configuration, not an
-  unlimited request size.
+The matched fault was **SIGSTOP of the origin transport process for five
+seconds, followed by SIGCONT**: OpenSSH transport for FRP, the echo connector for
+Quick. The probe ran on the origin, using the public relay endpoint for FRP or
+an origin-local `cloudflared access tcp` client for Quick. Both old-stream and
+new-connection responses were observed blocked during every pause.
 
-### Repeating the workloads
+| Five trials per product | FRP tunnel | Cloudflare Quick Tunnel |
+| --- | --- | --- |
+| SIGCONT → first verified new response, median [range], seconds | **0.015 [0.012–0.050]** | **1.642 [0.133–23.774]** |
+| Existing echo connections surviving the pause | **5/5** | **2/5** |
 
-Use isolated hosts and the normal [deployment procedure](deployment.md).
-Keep all addresses and credentials in private inputs. In this run the origin
-hosted an echo fixture on 18081, a no-store 1,088-byte HTTP fixture on 18080, iperf
-bound to loopback 5201 for publication, and a separate direct-control iperf
-listener on 5202. Direct fixture ports were firewalled to the relay; published
-benchmark TCP ports were limited to loopback and the origin. SSH administration
-remained separately pinned.
+Timing starts immediately before the SIGCONT command, **excluding the injected
+five-second pause**. New probes had a 0.2 s socket timeout, 0.1 s pause after
+failure and a 30 s recovery deadline. Old-stream survival was checked after
+new-request recovery, with a one-second timeout. The full five Quick recovery
+times were **1.642, 23.774, 1.934, 0.138, 0.133 seconds**; the long result is not
+an outlier discarded from the comparison. No client hostname configuration was
+changed between these pause trials. These are process-suspension observations,
+not a packet-loss experiment, relay-failure test, exact outage duration or SLA.
 
-On the relay, run each direction/path three times in the interleaved order
-described above; `$ORIGIN` is the private direct-control address:
+A **separate single Quick process restart** assigned a **different hostname**.
+The old configured client failed to return the checked echo. Explicitly updating
+the hostname and recreating the visitor access client restored a verified
+22-byte echo. No automatic stable-hostname recovery time is claimed for this
+case: controller SSH and configuration-refresh time were not part of the timed
+fault comparison. This agrees with Quick Tunnel's documented ephemeral URLs [Q1].
+
+Do not confuse pause survival with restart survival. The earlier FRP-only
+`systemctl restart frp-tunnel-transport` experiment broke all five existing
+connections; it was a different fault on a different VM pair, archived below.
+
+## Environment, limits and reproduction
+
+- Two newly provisioned **Hetzner CX23** VMs in **Nuremberg (`nbg1`)**, each with
+  **2 shared vCPUs and 4 GB advertised RAM**. Both exposed **AMD EPYC-Rome** CPU
+  models. They ran Ubuntu **24.04.4 LTS**, Linux **6.8.0-138-generic**,
+  **FRP 0.71.0**, **OpenSSH 9.6p1 Ubuntu-3ubuntu13.19**, **iperf 3.16** and,
+  on the relay, **Caddy 2.11.7**. Public-interface MTU was 1500; loopback 65536.
+- **cloudflared 2026.9.3**, from the official versioned release [Q3], was verified
+  against its published SHA-256 asset digest, retained in the evidence. Automatic
+  updates were disabled. No Access login or account credentials were required;
+  no DNS zone or named tunnel was created.
+- Quick connectors registered through **Paris (`cdg11`/`cdg14`/`cdg13`)** before
+  timing, using QUIC. Echo reconnected through other `cdg` instances during the
+  fault experiments. The HTTP visitor edge was `CDG` throughout its 100 samples.
+- **Stock socket settings were retained.** Kernel `rmem_max` and `wmem_max` were
+  **212,992 bytes**; all four Quick connectors logged a UDP receive-buffer-size
+  warning. No buffer tuning or HTTP/2 alternative-transport trial was performed.
+  These results must not be advertised as optimized Cloudflare capacity.
+- HTTPS used an explicitly trusted Caddy internal CA and loopback `--resolve`
+  for FRP, versus ordinary public DNS and certificate validation for Quick.
+  DNS, edge routing and certificate handshakes therefore differ. No insecure
+  TLS switches were used. Only `public` HTTP access was measured, not Basic/OIDC,
+  browser login, CDN cache hits, WAF effectiveness or public certificate issuance.
+- p50 is the ordinary median; p95 is nearest-rank
+  `sorted_samples[ceil(0.95*n)-1]`. Small three-trial transfer sets use median
+  and range, not a meaningful p95 claim. All failed or partial probe records
+  would be retained. No failures were retried away or replaced by another route.
+
+Use isolated hosts and the normal [deployment procedure](deployment.md). Keep
+all generated URLs, pins, keys, inventories and logs private. This run used
+origin echo port 18081, HTTP port 18080, loopback iperf port 5201 and direct-control
+iperf port 5202. HTTP returned `b'frp-benchmark-v1\n' * 64` for small probes,
+streamed SHA-256/length responses for POSTs, and served a pregenerated random
+8 MiB download, always with `Cache-Control: no-store`. Direct fixture ports were
+firewalled to the peer and loopback. Backend fixtures held no real application data.
+
+FRP publications used public ports 2233 (echo), 5201 (iperf), 2222 (managed SSH)
+and 443 (Caddy), with corresponding relay-loopback ports 12223, 15201, 12222 and
+12300. Start separate Quick origin processes for the same four backends:
 
 ```bash
-iperf3 -c "$ORIGIN" -p 5202 -P 1 -t 30 -O 3 -C cubic -J
-iperf3 -c 127.0.0.1 -p 5201 -P 1 -t 30 -O 3 -C cubic -J
-iperf3 -c "$ORIGIN" -p 5202 -P 1 -t 30 -O 3 -C cubic -J -R
-iperf3 -c 127.0.0.1 -p 5201 -P 1 -t 30 -O 3 -C cubic -J -R
+cloudflared tunnel --no-autoupdate --metrics 127.0.0.1:20241 --url http://127.0.0.1:18080
+cloudflared tunnel --no-autoupdate --metrics 127.0.0.1:20242 --url tcp://127.0.0.1:5201
+cloudflared tunnel --no-autoupdate --metrics 127.0.0.1:20243 --url tcp://127.0.0.1:18081
+cloudflared tunnel --no-autoupdate --metrics 127.0.0.1:20244 --url ssh://127.0.0.1:2222
 ```
 
-The published iperf service used origin backend `127.0.0.1:5201`, relay-loopback
-FRP port 15201 and public port 5201. Echo used backend 18081, relay-loopback
-12223 and public 2233. HTTPS used relay-loopback 12300 and public 443, with an
-explicitly trusted internal CA and `public` access policy. Native SSH used the
-default managed SSH publication. A matching verified-transfer command is:
+Run them as separately supervised processes, retaining the assigned hostnames
+privately. On the visitor, TCP access needs adapters; for example:
+
+```bash
+cloudflared --no-autoupdate access tcp --hostname "$QT_IPERF_HOST" --url 127.0.0.1:25201
+```
+
+Analogous echo/SSH adapters listened on 22334/22224. TLS WebSockets were verified
+in this release's actual Quick setup; HTTP-centric Quick documentation alone
+would not have proved these TCP/SSH paths. Ordinary OpenSSH then used private
+profiles pointing at FRP port 2222 or Quick adapter port 22224, both pinned to
+the same origin host key.
+
+For each of three repetitions, interleave these on the relay, first without
+`-R` (upload), then with `-R` (download):
+
+```bash
+iperf3 -c "$ORIGIN" -p 5202 -P 1 -t 30 -O 3 -C cubic --connect-timeout 10000 -J
+iperf3 -c 127.0.0.1 -p 5201 -P 1 -t 30 -O 3 -C cubic --connect-timeout 10000 -J
+iperf3 -c 127.0.0.1 -p 25201 -P 1 -t 30 -O 3 -C cubic --connect-timeout 10000 -J
+```
+
+The iperf subprocess deadline was 60 s; receiver rate is
+`bytes * 8 / receiver_seconds / 1e6`. Recorded retransmissions belong to the
+iperf TCP connection, not the outer SSH/QUIC network. Echo used `TCP_NODELAY` on
+the visitor and checked every response. HTTPS used separate curl processes,
+`--http1.1 --noproxy '*'`, a fresh nonce and no redirects. Application transfers
+were sequential and bounded, not a 200-request concurrency or production load test.
+The SSH check was:
 
 ```bash
 python3 scripts/tunnel.py bulk-check \
-  --ssh-config "$PRIVATE/client.conf" --host benchmark \
-  --size-mib 64 --timeout 60 --json
+  --ssh-config "$PRIVATE/client.conf" --host cf \
+  --size-mib 64 --timeout 120 --json
 ```
 
-Run that three times from the relay; for the separate workstation experiment,
-use the explicit SOCKS profile, `--size-mib 32 --timeout 120`. For resource
-sampling, read `/proc/PID/stat` CPU ticks and RSS for the accounting boundaries
-above at one-second intervals; sum RSS, convert ticks with `SC_CLK_TCK`, and
-divide CPU time by actual elapsed wall time. Keep per-sample records rather than
-using a single `ps` snapshot. Follow the echo, HTTPS and recovery definitions
-above; do not replace their checked responses with TCP handshakes.
+Repeat for both private aliases three times. The 60-second resource windows
+were separate from the 30-second throughput trials. Sample `/proc` CPU-time
+deltas and RSS at one-second intervals using the accounting boundaries above;
+retain actual intervals and per-unit readings. Do not substitute one `ps`
+snapshot, an iperf CPU percentage or a TCP handshake for these measurements.
 
-The throwaway probes are not a supported benchmark harness. Only the sanitized
-measurement record is retained in the repository; temporary fixtures and
-credentials are not production deployment inputs.
-Both temporary VPSs and their two primary IPs were deleted after capture;
-pre-existing cloud servers were left untouched.
+The throwaway probes are not a shipped benchmark harness. Sanitized records
+are retained; temporary fixtures, credentials and private diagnostic logs are
+not production inputs.
+The temporary servers, their primary IPs and the temporary provider SSH key were
+removed after capture; unrelated servers and existing account credentials were
+left untouched.
 
-## Operational limits, not performance measurements
+## Tailscale: published context, not measured here
 
-| Property | FRP tunnel | Cloudflare Tunnel | Tailscale |
+| Published metric | Reported observation | Scope and limitation |
+| --- | --- | --- |
+| Direct TCP dataplane goodput [T1] | **13.0 Gbit/s** bare metal; **7.29 Gbit/s** AWS | Vendor's optimized **wireguard-go** benchmark, 2023-04-13; not Funnel, DERP, or SSH file transfer. |
+| Relayed TCP goodput [T2] | **2.20 Mbit/s DERP / 27.5 Mbit/s Peer Relay** | One Delhi–Minnesota field report, 2026-01-26; not universal limits or the newer GA implementation's benchmark. |
+| Relayed diagnostic ping [T2] | **441–478 ms DERP**, then **306/298 ms Peer Relay** | Different routes, not HTTP/echo percentiles or isolated protocol overhead. |
+| Comparable daemon RSS/CPU, recovery and Funnel throughput | **Not reported in reviewed sources** | Not zero or unlimited. No equivalent Tailscale workload was run here. |
+
+[T1] used one iperf 3.9 TCP stream, Cubic, 10 seconds without omitted warm-up,
+128 KiB blocks, Ubuntu 22.04, either two i5-12400/25-Gbit/s Mellanox systems on
+DAC or two AWS c6i.8xlarge instances in `us-east-2b`. Optimizations were entering
+Tailscale v1.40; this was not a released-v1.40 daemon benchmark. Its 0.035/0.126 ms
+average pings are underlay baselines, not VPN overhead.
+
+[T2] used 120-second iperf3 observations, Chicago DERP versus a residential-fiber
+Peer Relay. Exact software/hardware, repeat count and reverse-direction results
+were not supplied. It predates the 2026-02-18 Peer Relay GA announcement [T4].
+These results cannot establish a speed ranking against the measured VPS pair.
+
+## Product constraints remain different
+
+| Property | FRP tunnel | Cloudflare | Tailscale |
 | --- | --- | --- | --- |
-| Public native TCP/SSH client | Ordinary native clients; explicit IPv4 TCP publications on available ports 1024–65535. Raw TCP does not itself add TLS or authentication. | Public-hostname TCP/SSH uses WebSockets and client-side `cloudflared access tcp/ssh`; vendor recommends Client-to-Tunnel for long-lived sessions [C4]. Paid Spectrum is a separate product, not this baseline. | Private tailnet access requires Tailscale or an appropriate network gateway. Public **Funnel** requires TLS, permits only **443/8443/10000**, and only tailnet `*.ts.net` names [T3]. Its TCP forwarder does not make unaided plaintext SSH equivalent. |
-| HTTP request-body limit | **128 MiB single POST verified here**. Operator/backend configuration governs; this is not a maximum or unlimited-capacity claim. | **100 MB Free/Pro; 200 MB Business; Enterprise self-service up to 5 GB**, subject to zone settings and timeouts [C5]. These are HTTP request limits, not TCP/SSH throughput limits. | Funnel documents non-configurable bandwidth limits but **does not disclose a numeric rate** in [T3]. Do not substitute a guessed Mbit/s or body-size limit. |
-| Redundancy | The measured deployment had one relay and one outbound SSH transport; no automatic multi-relay HA. | **4 connections to at least 2 Cloudflare data centers** per connector; up to **25 replicas / 100 connections per tunnel** [C2]. This is not an uptime percentage. | Direct, DERP and customer-hosted Peer Relay paths must be distinguished. Funnel is a separate public relay path [T2][T3][T4]. |
-| Cost boundary | MIT project code; operator pays for and maintains relay infrastructure and egress. The second VPS here served as a disposable test origin. | Tunnel connectivity is available at no cost; optional services and origin hosting are separate [C6]. Free Tunnel does **not** imply unrestricted public large-file/video delivery; public-hostname policy restrictions apply [C7]. | Personal is free for **non-commercial** use; business plans are paid [T5]. Funnel is available on all plans [T3]; self-hosted Peer Relay infrastructure still has a cost. |
+| Public client | Native TCP clients; explicit IPv4 publications on available ports 1024–65535. Raw TCP does not itself add authentication/TLS. | TCP/SSH required client-side cloudflared in this test [C4]. Quick HTTPS needed no special client or account [Q1]. | Private connectivity needs Tailscale or an appropriate gateway. Public Funnel requires TLS, ports **443/8443/10000**, and tailnet `*.ts.net` names [T3]. |
+| Limits and stability | Operator/backend policy; the matched 8 MiB POST passed. One relay, no automatic multi-relay HA. | Quick: **200 in-flight requests**, no SSE or uptime guarantee, changing hostname [Q1]. Named Tunnel's **4 connections to ≥2 data centers**, up to **25 replicas**, are **not this Quick setup** [C2]. | Funnel has non-configurable bandwidth limits without a numeric rate disclosed in [T3]. Direct mesh, DERP, Peer Relay and Funnel must not be conflated. |
+| HTTP request-body limits | 8 MiB verified in this matched run; 128 MiB in the archived project-only run. Neither establishes a maximum. | General proxied-HTTP plans document **100 MB Free/Pro, 200 MB Business, Enterprise self-service up to 5 GB** [C5]. Do not relabel those as a verified Quick entitlement or an SSH transfer cap. | No comparable numeric Funnel body-size limit established by the reviewed sources. |
+| Cost boundary | MIT code; operator pays for relay, egress and administration. | Quick needs no account; named Tunnel connectivity is available at no cost [C6], with optional services/hosting separate. Public-hostname large-file/video policy restrictions still matter [C7]. | Personal is free for **non-commercial** use; business plans are paid [T5]. Funnel is available on all plans [T3]; customer-hosted relay infrastructure still costs money. |
 
-Cloudflare's baseline recommendation [C1] is not evidence that this project's
-measured RSS makes it proportionally more efficient. Likewise, Tailscale's
-high-throughput direct dataplane result does not predict Funnel performance.
-Choose first by required access path, trust model and operational ownership;
-benchmark the intended origin and visitor networks before choosing by speed.
+## Earlier project-only evidence
+
+The [original FRP-only records](benchmark-results/2026-10-05-hetzner.json) and
+[their original methodology](https://github.com/0xprincess/frp-tunnel/blob/2ca728a8c3a489368cba406fbc86a1e66a00e38d/docs/comparison.md)
+remain available. That pair had an Intel relay/AMD origin and an earlier OpenSSH
+package revision. Its Internet/SOCKS workstation transfers, 128 MiB POST and
+explicit transport-restart measurements were **not rerun as matched Quick
+experiments**. Do not pool those observations with this new pair or mistake the
+new FRP numbers for a software performance improvement; project runtime code
+was unchanged.
 
 ## Sources
 
-Sources reviewed on 2026-10-05. Publication dates are stated above for
-benchmarks; live product documentation and pricing can change.
+Reviewed 2026-10-05; live documentation and pricing can change.
 
+[Q1]: https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/
+[Q2]: https://github.com/cloudflare/cloudflared/blob/2026.9.3/cmd/cloudflared/tunnel/quick_tunnel.go
+[Q3]: https://github.com/cloudflare/cloudflared/releases/tag/2026.9.3
 [C1]: https://developers.cloudflare.com/tunnel/platform/system-requirements/
 [C2]: https://developers.cloudflare.com/tunnel/configuration/
-[C3]: https://developers.cloudflare.com/tunnel/reference/run-parameters/
 [C4]: https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/routing-to-tunnel/protocols/
 [C5]: https://developers.cloudflare.com/cache/concepts/default-cache-behavior/#upload-limits
 [C6]: https://blog.cloudflare.com/tunnel-for-everyone/
 [C7]: https://developers.cloudflare.com/cloudflare-one/faq/cloudflare-tunnels-faq/#large-file-and-streaming-traffic-through-tunnel
-[C8]: https://github.com/cloudflare/cloudflared/issues/895
 [T1]: https://tailscale.com/blog/more-throughput
 [T2]: https://tailscale.com/blog/peer-relays-international-networks
 [T3]: https://tailscale.com/docs/features/tailscale-funnel
 [T4]: https://tailscale.com/blog/peer-relays-ga
 [T5]: https://tailscale.com/pricing
 
-- [C1 — Cloudflare system requirements][C1].
-- [C2 — Cloudflare connection topology and replicas][C2].
-- [C3 — cloudflared run parameters][C3].
+- [Q1 — Quick Tunnel setup and limits][Q1].
+- [Q2 — Pinned Quick Tunnel implementation][Q2].
+- [Q3 — cloudflared 2026.9.3 release][Q3].
+- [C1 — Cloudflare system recommendations][C1].
+- [C2 — Named Tunnel connection topology and replicas][C2].
 - [C4 — Published application protocols][C4].
-- [C5 — Cloudflare HTTP upload limits][C5].
-- [C6 — Free Tunnel announcement, 2021-04-15][C6].
-- [C7 — Tunnel large-file and streaming policy][C7].
-- [C8 — Historical community throughput observations][C8].
+- [C5 — Proxied HTTP upload limits][C5].
+- [C6 — Free Tunnel announcement][C6].
+- [C7 — Large-file and streaming policy][C7].
 - [T1 — Optimized wireguard-go throughput, 2023-04-13][T1].
 - [T2 — DERP/Peer Relay field observations, 2026-01-26][T2].
 - [T3 — Funnel requirements and limitations][T3].
 - [T4 — Peer Relay general availability, 2026-02-18][T4].
-- [T5 — Tailscale pricing and usage entitlements][T5].
+- [T5 — Tailscale pricing and entitlements][T5].
