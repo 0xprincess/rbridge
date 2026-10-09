@@ -19,8 +19,9 @@ and recovery on temporary Hetzner VPSs. Separate matched batches and different
 access paths prevent a universal speed ranking.
 
 The [`v0.1` release](https://github.com/0xprincess/frp-tunnel/releases/tag/v0.1)
-preserves the complete SSH-only baseline. Generalized publishing is developed on
-`dev`; [deployment](docs/deployment.md) describes migration and rollback.
+preserves the complete SSH-only baseline. Generalized publishing and the `rbridge`
+CLI are available on `main`; [deployment](docs/deployment.md) describes migration
+and rollback.
 
 ```mermaid
 flowchart LR
@@ -37,6 +38,8 @@ flowchart LR
 ## Included
 
 - Multiple named TCP and HTTP services, with one validated configuration model.
+- Web-first `rbridge` workspace: one-time setup, short publish/remove commands,
+  automatic internal ports, redacted discovery, and interruption previews.
 - Custom web hostnames, automatic HTTPS certificates/renewals, WebSockets and
   streaming responses; verified HTTPS backends are supported.
 - Explicit per-web-app `public`, `application`, `basic`, or `oidc` access policy.
@@ -53,17 +56,51 @@ All raw FRP service ports and management APIs stay on relay/client loopback.
 Only explicit TCP publications and Caddy's web listeners are public. A web
 application has no public raw port that could bypass its access policy.
 
+## Install the CLI
+
+From this checkout, on Linux or WSL:
+
+```bash
+sh install.sh
+export PATH="$HOME/.local/bin:$PATH"
+rbridge --help
+```
+
+Add that PATH setting to your shell profile if needed. The installer requires
+Python 3.11+ with `venv`/pip support, OpenSSH, `tar`, and Internet access for Python
+dependencies. On Ubuntu, install `python3-venv` if virtualenv creation fails.
+No sudo is needed for installation.
+
+The command is installed at `~/.local/bin/rbridge`. Its isolated Python
+environment and bundled Ansible playbook/roles live under
+`~/.local/share/rbridge`; commands work from any directory without activating a
+virtualenv or retaining this checkout. No private inventory, secrets, `.env`,
+logs or Git history are copied from the checkout.
+
+For another location/interpreter, use
+`sh install.sh --prefix /path/to/prefix --python python3.12`, then add that
+prefix's `bin` directory to PATH. Use the Linux filesystem, not WSL `/mnt`.
+
+**Update:** obtain the desired project revision and rerun the installer with the
+same prefix. Each installation builds a separate release and switches to it only
+after dependencies and CLI startup succeed. Failed builds leave the previous
+release selected. Old releases are retained; private workspaces are untouched.
+Do not move an installed prefix: Python virtualenvs contain absolute paths.
+
+**Uninstall the local CLI:** remove `~/.local/bin/rbridge` and
+`~/.local/share/rbridge` (adjust both for a custom prefix). This does not stop
+deployed publications, uninstall relay/origin services, or delete private
+workspaces; use the [operations guide](docs/operations.md#rotation-and-removal)
+for those actions.
+
 ## Quick start
 
 Use a Linux/WSL controller with Python 3.11+, OpenSSH and sudo. Both managed hosts
-need Ubuntu 24.04+ with systemd; enable systemd in WSL first. The default SSH
-preset requires an existing non-root client login account.
+need Ubuntu 24.04+ with systemd; enable systemd in WSL first. The web-first
+workspace uses the current Linux/WSL host as the origin and needs no login account.
 
 ```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install -r requirements-dev.txt
-export ANSIBLE_CONFIG="$PWD/ansible/ansible.cfg"
+export PATH="$HOME/.local/bin:$PATH"
 export PRIVATE="$HOME/.config/frp-tunnel-private"
 ```
 
@@ -72,70 +109,69 @@ console and independently verify its fingerprint. Save an unhashed `known_hosts`
 entry outside the checkout; `ssh-keyscan` alone does not establish trust.
 
 ```bash
-python scripts/create-secrets.py \
-  --output "$PRIVATE" \
-  --server-host relay.example.invalid \
-  --client-user developer \
-  --known-hosts "$HOME/.config/verified-relay-hosts"
+rbridge init \
+  --relay relay.example.invalid \
+  --known-hosts "$HOME/.config/verified-relay-hosts" \
+  --admin-key "$HOME/.ssh/relay-admin"
+rbridge plan
+rbridge apply --ask-become-pass
 ```
 
-Replace the documentation-only hostname and account. The generator refuses
-existing directories and Git checkouts; use a Linux filesystem, not WSL `/mnt`.
-It creates private `inventory.yml`, editable `services.yml`, `secrets.yml`, and
-separate relay/login keys. Review inventory administration and sudo settings.
+Replace the documentation-only relay hostname. `init` creates private inputs
+outside the checkout, on the Linux filesystem (not WSL `/mnt`), and refuses to
+overwrite existing keys. It does **not** provision a VPS or publish a service.
+Review the generated inventory before `apply`, which deploys both hosts using
+Ansible. Omit `--ask-become-pass` when sudo is passwordless. Administrative SSH is
+non-interactive: load an encrypted administrative key into your agent first.
 
-The generated `services.yml` contains the SSH preset. Add services there, for
-example:
-
-```yaml
-frp_server_address: relay.example.invalid
-frp_managed_ssh: true
-frp_services:
-  - name: ssh
-    protocol: tcp
-    backend: 127.0.0.1:2222
-    relay_port: 12222
-    public_port: 2222
-  - name: website
-    protocol: http
-    hostname: www.example.invalid
-    backend: http://127.0.0.1:3000
-    relay_port: 12300
-    access:
-      mode: public
-```
-
-`relay_port` is private to the relay. Public TCP ports must be explicit, distinct
-from all relay-local listeners, and at least 1024. HTTP services require a
-hostname and explicit access policy. `public` intentionally permits everyone;
-use [access policies](docs/deployment.md#web-access-policies) for private tools.
-For web-only installations, use `--services-file` with your configuration and
-`--no-managed-ssh`; no client login account/key is then required.
+Start your application on port 3000. Point a hostname you control to the relay
+and allow inbound relay SSH and TCP 80/443 for HTTPS/ACME. Firewall and DNS remain
+administrator-owned; never expose FRP control, relay-local, OIDC or admin ports.
 
 ```bash
-python scripts/tunnel.py validate \
-  --config "$PRIVATE/services.yml" --config "$PRIVATE/secrets.yml"
-export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$PRIVATE/known_hosts -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
-ansible-playbook -i "$PRIVATE/inventory.yml" \
-  -e "@$PRIVATE/services.yml" -e "@$PRIVATE/secrets.yml" \
-  --private-key "$HOME/.ssh/relay-admin" --limit frp_servers ansible/deploy.yml
-ansible-playbook -i "$PRIVATE/inventory.yml" \
-  -e "@$PRIVATE/services.yml" -e "@$PRIVATE/secrets.yml" \
-  --ask-become-pass --limit frp_clients ansible/deploy.yml
+# Preview only: no service file or host changes.
+rbridge publish 3000 --name demo \
+  --hostname demo.example.invalid --access public --dry-run
+
+# Deploy by default after displaying interruption impact.
+rbridge publish 3000 --name demo \
+  --hostname demo.example.invalid --access public --ask-become-pass
+
+rbridge list --show-endpoints
+rbridge status --json
 ```
 
-Allow relay inbound SSH, chosen public TCP ports, and TCP 80/443 for web
-publishing. Point each web hostname's DNS to the relay; automatic public
-certificates require reachable ACME challenges. Do not open FRP control, relay
-service, OIDC or admin API ports. Firewall policy remains administrator-owned.
+`public` deliberately permits everyone. Use `--access application` when the app
+owns authentication, or `--access-file` for a private Basic/OIDC policy. A new
+service requires an explicit policy. Updating a named app preserves its hostname,
+access policy and internal port when those options are omitted:
 
 ```bash
-ssh -p 2222 -i "$PRIVATE/login_id_ed25519" developer@relay.example.invalid
+rbridge publish 3001 --name demo --ask-become-pass
+rbridge remove demo --dry-run   # preview removal
+rbridge remove demo --ask-become-pass
 ```
 
-Verify the tunneled client's SSH fingerprint independently before first login;
-it is not the relay's fingerprint. Web clients use `https://` and the configured
-hostname. HTTPS terminates at the relay, which can read web traffic.
+`publish`, `remove`, and `apply` perform a real rollout by default. Add
+`--dry-run` for a non-mutating preview: no workspace writes, deployment, or
+sudo prompt. `plan` remains read-only; `init` only creates local workspace inputs.
+
+Publication is persistent, not tied to this terminal. Removing the final
+publication leaves idle infrastructure, credentials and certificate storage;
+full uninstall remains manual. Any manifest/policy change can disconnect
+**all** services sharing the transport, including unchanged apps. Failed applies
+remain explicitly uncertain until a successful rollout. Plans compare against
+the last successful CLI apply, not live host state.
+
+Names/endpoints are hidden by default; `--show-endpoints` explicitly reveals
+local connection instructions, never credentials. `list` describes configured
+services without probing; `status` checks public ingress from this machine,
+not authenticated login or end-to-end application readiness.
+
+See [publishing workspaces](docs/deployment.md#publishing-workspace) for command
+contracts, policies and port allocation. [Advanced configuration](docs/deployment.md#private-configuration)
+supports multiple TCP services, optional managed SSH and direct Ansible use.
+HTTPS terminates at the relay, which can read web traffic.
 
 ## Operations and verification
 

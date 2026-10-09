@@ -1,5 +1,62 @@
 # Operations
 
+## Discover and manage publications
+
+Use the workspace front door from the controller:
+
+```bash
+rbridge list
+rbridge list --show-endpoints
+rbridge status --json --timeout 3
+rbridge plan
+rbridge remove demo --dry-run # preview only
+rbridge remove demo           # deploy removal
+```
+
+`list` never probes: JSON reports `checked: false`, `ok: null` and
+`health: not_checked`. `status` checks the configured public ingress from this
+network and reports its scope, not a complete application health claim.
+`--local-role client|server` adds the existing layered doctor checks for a role
+installed on the machine running the command; it needs permission to read that
+host's FRP configuration. For privileged diagnostics without changing workspace
+ownership, use the standalone `sudo ... tunnel.py doctor` commands below.
+
+Service numbers follow current configuration order. Names, endpoints and
+connection commands appear only with `--show-endpoints`; do not share that
+output indiscriminately. SSH instructions require the correct private login key
+and an independently verified backend host pin. Generic TCP endpoints do not
+imply SSH. Basic challenges/OIDC redirects do not prove a completed login.
+
+Bridge exit codes are 0 for successful actions/previews/listing or passing scoped
+checks, 1 for failed/unknown checks or failed Ansible deployment, 2 for input,
+workspace or subprocess errors, and 130 for interruption. `--json` writes one
+result to stdout; apply interruption previews and progress go to stderr and
+remain redacted unless endpoint disclosure was requested.
+
+### Impact and failed applies
+
+Plans compare private input against `last-applied.json`, the last successful
+**CLI** application, not actual hosts. Manual Ansible changes and external drift
+are not tracked. Unknown baselines do not invent a live diff. Historical removal
+indexes in plans refer to the previous apply, not today's `remove NUMBER`.
+
+A manifest, access-policy or FRP-token change can revoke every registration and
+disconnect unchanged services. Infrastructure changes also warn about restart
+risk. Even unchanged input is not a no-downtime promise. If inventory targets
+change, inspect the former hosts: applying new targets does not uninstall them.
+
+After failure/interruption, `apply-pending.json` marks the workspace incomplete.
+Inspect private `apply.log`, diagnose both hosts, correct the inputs and run
+`plan`, then `apply`. A successful rollout clears the marker; do not delete it
+to claim recovery. Saved desired inputs remain available for retry.
+
+Exiting the CLI does not stop systemd publications. Backends must keep running;
+WSL must remain running and Windows awake. Removing a publication does not stop
+the application. Removing the last HTTP publication closes managed web ingress;
+removing all publications leaves idle transport infrastructure, accounts,
+credentials and certificate storage. [Full removal](#rotation-and-removal)
+remains an explicit administrative operation.
+
 ## Diagnose the installed deployment
 
 Run from a repository checkout on the client or relay. Roles install Python's
@@ -202,7 +259,10 @@ retries registration. Starting transport also starts its FRP client, including
 after an explicit stop/start maintenance cycle. Existing connections can disconnect during any restart,
 computer sleep or network outage. Reconnect after registration recovers.
 
-Edit private services, validate, then deploy both hosts using the same files.
+Use `rbridge publish/remove ...` (real deployment by default; add `--dry-run`
+for a non-mutating preview), or edit private services and run
+`rbridge plan` followed by `rbridge apply`. Direct Ansible operators must validate
+and deploy both hosts using the same files.
 Removing a service cleans its generated public sockets and proxy configuration.
 Changing OIDC policy/ports can briefly return an error while authenticators
 restart; requests do not bypass authentication. Removing the final HTTP service

@@ -2,8 +2,10 @@
 bindAddr = "127.0.0.1"
 bindPort = {{ frp_server_port | int }}
 proxyBindAddr = "127.0.0.1"
-allowPorts = [{% for service in frp_services_normalized %}{ single = {{ service.relay_port }} }{{ ", " if not loop.last else "" }}{% endfor %}]
-maxPortsPerClient = {{ frp_services_normalized | length }}
+# An empty allowPorts list means unrestricted in FRP. With no publications,
+# permit only the already-bound control port, which cannot become a proxy.
+allowPorts = [{% for service in frp_services_normalized %}{ single = {{ service.relay_port }} }{{ ", " if not loop.last else "" }}{% else %}{ single = {{ frp_server_port | int }} }{% endfor %}]
+maxPortsPerClient = {{ [frp_services_normalized | length, 1] | max }}
 auth.method = "token"
 auth.additionalScopes = ["HeartBeats", "NewWorkConns"]
 auth.tokenSource.type = "file"

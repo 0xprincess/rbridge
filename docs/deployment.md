@@ -35,7 +35,87 @@ The account has a locked password and `nologin` shell. Command execution, remote
 forwarding and Unix socket forwarding are denied. The complete native SSH
 configuration and effective account policy are checked before reload.
 
+## Publishing workspace
+
+The recommended front door is the installed `rbridge` command. Follow the README's
+`init` instructions once, then use `publish`, `plan`, `apply`, `list`, `status`
+and `remove`. Every command accepts `--private-dir`; otherwise it uses `$PRIVATE`
+or `~/.config/frp-tunnel-private`. Install with `sh install.sh` from a checkout;
+the installed command bundles its own Python environment and Ansible roles and
+works from any directory. Contributors may still run `python scripts/bridge.py`
+in a source virtualenv. The workspace must be owned by the invoking user, outside
+every checkout and WSL `/mnt`, with directory mode 0700 and file mode 0600.
+
+`init` generates only a transport identity: `frp_managed_ssh: false` and explicit
+`frp_services: []`. It targets the current Linux/WSL host as the origin and an
+existing relay via pinned SSH. Review `inventory.yml` for remote origins or
+administrative/sudo differences. `controller.yml` stores the administrative key
+path, not a second key. The administrative key must be usable without an SSH
+password prompt; an encrypted key can be loaded into the user's SSH agent.
+No cloud resources, DNS records, firewall rules or Windows startup task are
+created by this CLI.
+
+| Command | Effect |
+| --- | --- |
+| `init ...` | Create private web-only inputs; no remote changes |
+| `publish PORT --name NAME --hostname HOST --access public` | Save a new local HTTP publication and deploy both hosts |
+| `publish http://HOST:PORT ...` | Publish an explicit HTTP/HTTPS backend using the shared schema |
+| `publish PORT --name NAME` | Deploy an app update; preserve its policy/hostname/relay port |
+| `publish ... --dry-run` | Preview the candidate revision without changing files or hosts |
+| `plan` | Compare current files with the last successful CLI apply, without contacting hosts |
+| `apply [--dry-run]` | Deploy current private files, or preview without mutation with `--dry-run` |
+| `list [--show-endpoints]` | Describe configured services; no health probes |
+| `status [--timeout 3]` | Bounded public ingress checks from the controller's network |
+| `remove NAME_OR_NUMBER [--dry-run]` | Remove and deploy by default, or preview with `--dry-run`; number is the current one-based list index |
+
+Publishing and removal now execute by default rather than requiring an opt-in
+deployment flag. Impact is still displayed before deployment. `--dry-run`
+never saves the candidate revision, creates a lock/log/state file, prompts for
+sudo, or runs Ansible; repeat without the flag to execute it. `init` remains
+local workspace creation; use `apply` afterward to deploy idle infrastructure.
+
+The default publication name is `web`; use explicit names for multiple apps.
+New HTTP publications require a hostname and explicit access policy. The
+allocator selects an unused configured port in 12000–65535, excluding control,
+admin, web, TCP-publication and OIDC listeners. This checks the service model,
+not unrelated live OS listeners; deployment may still fail on an external port
+conflict. Updating a service retains its existing relay port.
+
+`--access public` and `--access application` cover the simple cases.
+`--access-file FILE` reads a private flat access mapping for any supported mode:
+
+```yaml
+mode: oidc
+allowed_domains:
+  - example.invalid
+```
+
+OIDC provider settings still belong in `secrets.yml`; register the exact callback
+and meet the [provider requirements](#web-access-policies). An omitted OIDC
+listener port is allocated automatically. Basic policy files contain `mode:
+basic` and the existing `users` mapping of bcrypt hashes, never plaintext
+passwords. Changing a policy requires an explicit option/file; omitted options
+on an update never silently make an app public.
+
+Keep service lists and `frp_managed_ssh` in `services.yml`, not a secrets overlay.
+Applying stages one immutable variable/inventory revision for both hosts, forces
+strict host-key verification against private `known_hosts`, disables implicit
+SSH proxies, and uses the existing fail-closed Ansible playbook. Relay pins in
+`secrets.yml` and `known_hosts` must match. Existing deployments can use this
+workspace flow by supplying private `controller.yml` with `admin_key: /private/admin-key`;
+without a saved CLI baseline, the first plan is explicitly unknown.
+
+Concurrent CLI applies to one workspace are rejected. This is not a distributed
+lock across controllers or a transaction across hosts. `--ask-become-pass` prompts
+on a terminal and supplies the password only through a temporary private variables
+file, removed after the attempt; otherwise use passwordless sudo. Ansible output
+goes to private `apply.log`, never public/JSON stdout. A successful apply records
+`last-applied.json`; failures retain the desired service configuration and
+`apply-pending.json` so plain `apply` retries that revision without losing the
+last successful baseline. Baselines and logs may contain credentials.
+
 ## Private configuration
+
 
 Keep these outside every checkout:
 
@@ -45,10 +125,18 @@ Keep these outside every checkout:
 - `secrets.yml`: relay/login keys, trusted relay host pins, FRP/admin credentials
   and, when used, OIDC provider secrets.
 
-Generate them using `scripts/create-secrets.py` as shown in the README. Use
-`--services-file FILE` for an existing flat service configuration and
-`--no-managed-ssh` to omit login-key generation. The generator validates the
-shared model before creating its destination and refuses existing directories.
+For an advanced SSH-first workspace, generate the isolated managed login service:
+
+```bash
+python scripts/create-secrets.py --output "$PRIVATE" \
+  --server-host relay.example.invalid --client-user developer \
+  --known-hosts "$HOME/.config/verified-relay-hosts"
+```
+
+This also creates separate relay and login keys. The non-root client login
+account must already exist. Use `--services-file FILE` for an existing flat
+service configuration and `--no-managed-ssh` to omit login-key generation.
+The generator validates the shared model and refuses existing directories.
 Public keys, hashes, host pins and provider identifiers also belong in private
 inputs; they can identify a deployment.
 
@@ -67,6 +155,13 @@ expressions. The Ansible playbook has a fatal preflight across selected hosts
 before provisioning. `--limit` validates only the selected hosts; this is not a
 cross-host transaction or a guarantee that every later binary/service operation
 will succeed.
+
+An explicit `frp_services: []` publishes nothing and supports infrastructure-only
+bootstrap or final-service removal. It is distinct from an omitted service list.
+With no publications, FRP's allowlist remains restricted to its already-bound
+control port rather than using an unrestricted empty allowlist. Web-only
+workspaces disable managed SSH; removing the last service through `bridge`
+also disables the dedicated managed SSH backend, never the host's native SSH.
 
 ### Service fields
 
