@@ -42,6 +42,15 @@ are masked before provisioning, and secret Ansible tasks suppress logs and diffs
 Custom debugging and error messages can still expose identifying details: avoid
 verbose production runs and review any logs before sharing them.
 
+Bridge workspaces additionally contain `controller.yml` (administrative key
+path), `last-applied.json` (the previous merged configuration, including
+credentials), an incomplete-apply marker and private `apply.log`. Keep all of
+them outside checkouts with restrictive permissions; previous credentials can
+remain in the baseline during failed rotations. Retain/revoke them deliberately.
+Bridge defaults redact names/endpoints as well as credentials; `--show-endpoints`
+is deliberate local disclosure, not permission to publish screenshots or logs.
+Even disclosed summaries never print key contents, passwords or tokens.
+
 OIDC client/cookie secrets, Basic password hashes, admin API credentials,
 certificate keys and browser session cookies also belong outside the checkout.
 Field-test `--artifacts` output can contain these values and must never be

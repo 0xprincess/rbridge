@@ -64,9 +64,16 @@ class ServiceModelTests(unittest.TestCase):
         self.assertEqual([item["backend_host"] for item in result], ["::1", "::1"])
 
     def test_missing_or_wrong_container_rejected(self):
-        for value in (None, {}, [], "ssh", [None], [1], [[]]):
+        for value in (None, {}, "ssh", [None], [1], [[]]):
             with self.subTest(value=value):
                 self.assert_invalid(value, "frp_services")
+
+    def test_explicit_empty_manifest_publishes_nothing_and_revokes_old_revision(self):
+        services = CONFIG.normalize_services([], reserved_ports=(7000, 22, 17401, 80, 443))
+        self.assertEqual(services, [])
+        key = "ab" * 32
+        self.assertNotEqual(CONFIG.revision_token(key, services),
+                            CONFIG.revision_token(key, CONFIG.normalize_services([tcp()])))
 
     def test_required_fields_and_protocol_specific_fields(self):
         for factory, fields in ((tcp, ("name", "protocol", "backend", "relay_port", "public_port")),

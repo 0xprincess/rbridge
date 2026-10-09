@@ -724,6 +724,22 @@ print(json.dumps(result,sort_keys=True))
         require(len(recaps) == 2 and all(row == ("0", "0", "0") for row in recaps),
                 "TCP-only optional-SSH deployment was not idempotent")
         self.mark("service removal, listener cleanup and managed-SSH-disabled deployment")
+        empty = dict(reduced, frp_services=[])
+        self.deploy(empty)
+        eventually(lambda: self.closed(2233), "Final public TCP publication remained open")
+        listeners = self.remote("relay", "ss -lntH").stdout.decode().splitlines()
+        require(not any(int(line.split()[3].rsplit(":", 1)[1]) == 12223 for line in listeners),
+                "Final relay service port remained open")
+        second = self.deploy(empty)
+        recaps = re.findall(r"changed=(\d+)\s+unreachable=(\d+)\s+failed=(\d+)", second.stdout.decode())
+        require(len(recaps) == 2 and all(row == ("0", "0", "0") for row in recaps),
+                "Infrastructure-only deployment was not idempotent")
+        # Re-publishing after an idle infrastructure-only revision must work.
+        self.deploy(reduced)
+        with socket.create_connection((self.address, 2233), timeout=5) as connection:
+            connection.sendall(b"republished-service")
+            require(connection.recv(64) == b"republished-service", "Publishing after an empty revision failed")
+        self.mark("final publication removal and re-publishing from idle infrastructure")
 
     def cleanup(self):
         for host in self.prepared:

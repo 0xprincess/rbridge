@@ -3,8 +3,8 @@
 Keep examples generic and deployment material outside the checkout. Read
 [privacy](docs/privacy.md), use the README's generic Git identity when appropriate,
 and do not commit field-test logs, cloud inventories or provider credentials.
-Work on feature branches and integrate into `dev`; `main` and the annotated
-`v0.1` release preserve the original completed SSH deployment.
+Work on feature branches and merge completed changes into `main`. The annotated
+`v0.1` release preserves the original completed SSH deployment.
 
 ## Local behavioral checks
 
@@ -22,6 +22,13 @@ These do not replace real deployment tests. Preserve host-key verification,
 private credential permissions, no-proxy transport, listener isolation and
 idempotence. The service model in `ansible/filter_plugins/frp_config.py` is shared
 by Ansible and the CLI; do not introduce a second schema implementation.
+
+Workspace regressions cover web-first initialization, non-mutating publication
+previews, internal-port allocation, policy preservation, redaction, apply failure
+state and retry, final-publication removal, and scoped discovery health. Unit
+tests isolate Ansible outcomes; exercise the real controller and FRP processes
+when changing these paths. Never run the provisioning roles on a normal
+workstation merely to smoke the CLI.
 
 ## Full field regression
 
@@ -71,7 +78,8 @@ Coverage includes:
 - Doctor's transport/registration/backend/ingress states under actual service
   failures; invalid config without deployed-file mutation; zero-change reapply.
 - Removed listeners/authenticators, optional managed SSH disabled without login
-  inputs, and surviving services after cleanup.
+  inputs, surviving services after cleanup, final-publication removal to an
+  idle infrastructure-only revision, and successful re-publication.
 
 The default suite removes fixture services, temporary trust/hosts entries and
 credentials, but leaves the final TCP-only project deployment on the disposable

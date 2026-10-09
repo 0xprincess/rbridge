@@ -106,8 +106,8 @@ def normalize_services(services, reserved_ports=(), oidc=None):
     All relay-side listeners share one collision domain. Backend listener ports
     belong to the client, and deliberately do not participate in that domain.
     """
-    if not isinstance(services, list) or not services:
-        _fail("frp_services", "must be a nonempty list")
+    if not isinstance(services, list):
+        _fail("frp_services", "must be an explicit list (empty publishes nothing)")
     occupied = set()
     for index, port in enumerate(reserved_ports):
         occupied.add(_port(port, f"reserved_ports[{index}]", minimum=1))

@@ -403,7 +403,7 @@ class GenerationTests(unittest.TestCase):
     def test_ci_rejects_invalid_services_before_creating_private_directory(self):
         with tempfile.TemporaryDirectory() as folder:
             environment = {"RUNNER_TEMP": folder, "DEPLOY_PRIVATE_KEY": "test-value", "DEPLOY_KNOWN_HOSTS": "test-value",
-                           "DEPLOY_INVENTORY": "all: {}", "TUNNEL_SECRETS": "frp_token: test-value", "TUNNEL_SERVICES": "frp_services: []"}
+                           "DEPLOY_INVENTORY": "all: {}", "TUNNEL_SECRETS": "frp_token: test-value", "TUNNEL_SERVICES": "frp_services: null"}
             with patch.dict(os.environ, environment, clear=True), redirect_stdout(io.StringIO()):
                 with self.assertRaises(ValueError):
                     prepare.main()
