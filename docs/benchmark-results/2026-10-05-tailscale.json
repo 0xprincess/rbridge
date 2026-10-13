@@ -2,7 +2,7 @@
   "schema_version": 3,
   "date_utc": "2026-10-05",
   "captured_at_utc": "2026-10-05T10:32:13.415137+00:00",
-  "project_commit": "496eac672d65763546e517cca7e1319202cd249f",
+  "project_commit": "d3912f630037772afe8e7b16603ce5e3b2c857f6",
   "scope": "Matched direct controls, FRP, Tailscale private mesh and public Funnel on one fresh CX23 nbg1 pair; previous Cloudflare batch is separate.",
   "visitor": "relay VPS for all timed workloads, including recovery; management SSH uses the ordinary public network, not Tailscale or FRP",
   "metadata": {

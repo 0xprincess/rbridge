@@ -1,10 +1,17 @@
-# FRP tunnel
+# rbridge
 
-Publish web applications and TCP services from Ubuntu or Ubuntu WSL2 through a
-relay you control, without router port forwarding. Ansible
-manages FRP over an outbound, host-pinned SSH connection; systemd reconnects it.
-Caddy publishes HTTPS, with optional Basic authentication or OIDC browser login.
-The origin-to-relay transport is direct SSH. Native SSH clients on filtered
+```bash
+rbridge publish 3000 --name demo --hostname demo.example.invalid --access public
+```
+
+After a one-time setup, that command puts a local app on your own domain over
+HTTPS, through a relay you control, with no router port forwarding.
+
+rbridge runs on Ubuntu or Ubuntu WSL2 and publishes web applications and TCP
+services with [FRP](https://github.com/fatedier/frp). Ansible manages FRP over an
+outbound, host-pinned SSH connection; systemd reconnects it. Caddy publishes
+HTTPS, with optional Basic authentication or OIDC browser login. The
+origin-to-relay transport is direct SSH. Native SSH clients on filtered
 networks can use an [explicit SOCKS access profile](docs/operations.md#native-ssh-access-on-filtered-networks).
 
 A self-hosted alternative to Cloudflare Tunnel for publishing web apps and TCP
@@ -18,7 +25,7 @@ mesh and public Funnel: throughput, checked HTTPS/SSH transfers, latency, CPU/RS
 and recovery on temporary Hetzner VPSs. Separate matched batches and different
 access paths prevent a universal speed ranking.
 
-The [`v0.1` release](https://github.com/0xprincess/frp-tunnel/releases/tag/v0.1)
+The [`v0.1` release](https://github.com/0xprincess/rbridge/releases/tag/v0.1)
 preserves the complete SSH-only baseline. Generalized publishing and the `rbridge`
 CLI are available on `main`; [deployment](docs/deployment.md) describes migration
 and rollback.
@@ -213,15 +220,34 @@ failures, transfers, streaming, restart recovery, removal and idempotence.
 
 Keep endpoints, accounts, keys, passwords, tokens, inventories and logs outside
 this checkout. Read [privacy](docs/privacy.md) and [security](SECURITY.md) before
-publishing. Hooks and CI detect common leaks, not every identifier. Install hooks
-and a generic identity if anonymous Git metadata is desired:
+publishing. Hooks and CI detect common leaks, not every identifier. Install the
+hooks:
 
 ```bash
 git config --local core.hooksPath .githooks
-git config --local user.name 'FRP Tunnel contributors'
+```
+
+Contributors who prefer anonymous Git metadata can commit under the generic
+identity checked by `scripts/check-privacy.py --anonymous-history`:
+
+```bash
+git config --local user.name 'rbridge contributors'
 git config --local user.email 'contributors@example.invalid'
 git config --local commit.gpgsign false
 ```
 
-This project's code is MIT licensed. Downloaded FRP, Caddy and oauth2-proxy
-binaries retain their upstream licenses and are not committed here.
+## Credits
+
+rbridge is a deployment and publishing layer around
+[FRP](https://github.com/fatedier/frp), the fast reverse proxy by
+[fatedier](https://github.com/fatedier) and its contributors. FRP's `frps` and
+`frpc` carry every tunnelled connection; rbridge supplies the SSH transport,
+HTTPS ingress, access policies and deployment automation around them.
+[Caddy](https://caddyserver.com) and
+[oauth2-proxy](https://github.com/oauth2-proxy/oauth2-proxy) provide HTTPS and
+browser login.
+
+## License
+
+This project's code is MIT licensed. Downloaded FRP (Apache-2.0), Caddy and
+oauth2-proxy binaries retain their upstream licenses and are not committed here.

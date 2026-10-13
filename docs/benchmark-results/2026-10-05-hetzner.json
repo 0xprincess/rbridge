@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date_utc": "2026-10-05",
-  "project_commit": "d216bdb705a7b4bf6eb653fce7504fca480bd6d7",
+  "project_commit": "5f7567fb5e6d42603eccd3a19563d6a03f335193",
   "recorded_at_utc": "2026-10-05T03:09:45.707242+00:00",
   "scope": "Only this project measured; direct controls use the same two VMs. Competitor numbers are separately sourced in comparison.md.",
   "metadata": {

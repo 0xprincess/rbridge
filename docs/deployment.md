@@ -320,7 +320,7 @@ There is no legacy `frp_public_ssh_port` alias. The tag preserves source, not a
 snapshot of installed machines. To inspect/redeploy the baseline:
 
 ```bash
-git worktree add --detach ../frp-tunnel-v0.1 v0.1
+git worktree add --detach ../rbridge-v0.1 v0.1
 ```
 
 Before running the old roles, stop and disable the newer relay publication and

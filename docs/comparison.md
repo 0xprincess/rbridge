@@ -3,9 +3,9 @@
 Measured **2026-10-05**, in **two separate matched batches**:
 
 - **Tailscale 1.102.4**, both private mesh and public Funnel, versus this project
-  at revision [`496eac6`](https://github.com/0xprincess/frp-tunnel/commit/496eac672d65763546e517cca7e1319202cd249f).
+  at revision [`d3912f6`](https://github.com/0xprincess/rbridge/commit/d3912f630037772afe8e7b16603ce5e3b2c857f6).
 - Earlier **cloudflared 2026.9.3 Quick Tunnel** versus project revision
-  [`2ca728a`](https://github.com/0xprincess/frp-tunnel/commit/2ca728a8c3a489368cba406fbc86a1e66a00e38d).
+  [`d25877d`](https://github.com/0xprincess/rbridge/commit/d25877d19a16e7b514591a81094becbe2bcd35a4).
 
 Each batch used a fresh **Hetzner CX23 pair in Nuremberg (`nbg1`)**, with
 **2 shared vCPUs and 4 GB advertised RAM per VM**. Within a batch, products used
@@ -49,7 +49,7 @@ direction/path: one Cubic stream, 30 timed seconds after three omitted warm-up
 seconds. Each repetition interleaved direct/FRP/mesh/Funnel uploads, then their
 downloads. Upload means visitor → origin; download is the reverse.
 
-| Metric | Direct control | FRP tunnel | Tailscale private mesh | Public Funnel |
+| Metric | Direct control | rbridge | Tailscale private mesh | Public Funnel |
 | --- | --- | --- | --- | --- |
 | TCP upload, Mbit/s | **6,680.51 [6,080.85–7,092.25]** | **1,622.35 [1,472.79–1,675.68]** | **1,251.98 [1,227.57–1,261.29]** | **14.67 [14.01–19.39]** |
 | TCP download, Mbit/s | **8,165.69 [8,117.27–8,431.56]** | **1,329.11 [1,323.48–1,362.80]** | **1,391.77 [1,329.04–1,486.64]** | **21.74 [20.87–21.78]** |
@@ -87,7 +87,7 @@ IP; Funnel used ordinary public DNS. DNS, TLS termination location and certifica
 chains therefore differ. No insecure TLS switches, redirects, compression,
 connection reuse, CDN cache hits or browser authentication were measured.
 
-| Metric | FRP tunnel | Tailscale private mesh | Public Funnel |
+| Metric | rbridge | Tailscale private mesh | Public Funnel |
 | --- | --- | --- | --- |
 | Fresh HTTPS time to first byte, p50 / p95, ms | **7.500 / 9.098** | **32.135 / 42.204** | **67.829 / 1,089.455** |
 | Fresh HTTPS total time, p50 / p95, ms | **7.662 / 9.353** | **32.287 / 42.348** | **67.995 / 1,089.600** |
@@ -166,7 +166,7 @@ then SIGCONT**: OpenSSH transport for FRP, `tailscaled` for mesh/Funnel. The vis
 was the **relay for every route**. Old-stream and new-connection responses were
 observed blocked during all 15 pauses.
 
-| Five trials per route | FRP tunnel | Tailscale private mesh | Public Funnel |
+| Five trials per route | rbridge | Tailscale private mesh | Public Funnel |
 | --- | --- | --- | --- |
 | SIGCONT command start → first verified new response, median [range], seconds | **0.037 [0.033–0.074]** | **0.042 [0.033–0.042]** | **0.127 [0.117–0.137]** |
 | Existing echo streams passing the post-recovery check | **5/5** | **5/5** | **4/5** |
@@ -286,7 +286,7 @@ not repository content.
 ## Earlier Cloudflare Quick Tunnel batch
 
 [Quick Tunnel evidence](benchmark-results/2026-10-05-quick-tunnel.json) and
-[its complete original methodology](https://github.com/0xprincess/frp-tunnel/blob/496eac672d65763546e517cca7e1319202cd249f/docs/comparison.md)
+[its complete original methodology](https://github.com/0xprincess/rbridge/blob/d3912f630037772afe8e7b16603ce5e3b2c857f6/docs/comparison.md)
 remain unchanged. That **AMD/AMD CX23 nbg1 pair** ran **cloudflared 2026.9.3**,
 OpenSSH **9.6p1 Ubuntu-3ubuntu13.19**, and the same listed FRP/Caddy/iperf/kernel
 versions. Quick is **not a named production tunnel**. TCP/SSH used actual
@@ -297,7 +297,7 @@ HTTPS bulk transfers, 12 verified SSH transfers, 600 resource samples, ten pause
 and one Quick restart**. Timed transfers had no failed records. The same
 30 s/3 s omitted, n=3 throughput and n=500 echo methodology produced:
 
-| Metric | Direct control | FRP tunnel | Cloudflare Quick Tunnel |
+| Metric | Direct control | rbridge | Cloudflare Quick Tunnel |
 | --- | --- | --- | --- |
 | TCP upload, Mbit/s | **5,585.39 [5,577.40–6,288.68]** | **2,479.09 [2,428.59–2,486.00]** | **292.08 [281.56–303.41]** |
 | TCP download, Mbit/s | **8,862.02 [8,749.45–8,924.36]** | **2,306.14 [2,246.54–2,322.56]** | **725.65 [704.85–762.18]** |
@@ -308,7 +308,7 @@ Fresh HTTPS used 100 verified 1,088-byte responses per product, with nonces and
 edge **`CDG`**, not cache hits. Bulk transfers were n=3 per direction/product,
 with exact byte counts/SHA-256 and the same bounded-payload methodology above.
 
-| Metric | FRP tunnel | Cloudflare Quick Tunnel |
+| Metric | rbridge | Cloudflare Quick Tunnel |
 | --- | --- | --- |
 | Fresh HTTPS time to first byte, p50 / p95, ms | **6.262 / 9.601** | **124.583 / 158.739** |
 | Fresh HTTPS total time, p50 / p95, ms | **6.386 / 9.785** | **124.821 / 158.906** |
@@ -347,7 +347,7 @@ The five-second SIGSTOP/SIGCONT trials paused FRP's SSH transport or Quick's ech
 connector. Unlike the Tailscale batch, probes ran **on the origin**, via the public
 FRP endpoint or an origin-local cloudflared adapter; SIGCONT was issued locally.
 
-| Five trials per product | FRP tunnel | Cloudflare Quick Tunnel |
+| Five trials per product | rbridge | Cloudflare Quick Tunnel |
 | --- | --- | --- |
 | SIGCONT → first verified new response, median [range], seconds | **0.015 [0.012–0.050]** | **1.642 [0.133–23.774]** |
 | Existing echo connections surviving the pause | **5/5** | **2/5** |
@@ -384,7 +384,7 @@ this VPS pair, nor a speed ranking against the measured products.
 
 ## Product constraints remain different
 
-| Property | FRP tunnel | Cloudflare | Tailscale |
+| Property | rbridge | Cloudflare | Tailscale |
 | --- | --- | --- | --- |
 | Public client | Native TCP clients; explicit IPv4 publications on available ports 1024–65535. Raw TCP does not itself add authentication/TLS. | TCP/SSH required client-side cloudflared in the Quick batch [C4]. Quick HTTPS needed no special client or account [Q1]. | Private connectivity needs Tailscale or an appropriate gateway. Public Funnel requires TLS, ports **443/8443/10000**, and tailnet `*.ts.net` names [T3]. |
 | Limits and stability | Operator/backend policy; the matched 8 MiB POST passed. One relay, no automatic multi-relay HA. | Quick: **200 in-flight requests**, no SSE or uptime guarantee, changing hostname [Q1]. Named Tunnel's **4 connections to ≥2 data centers**, up to **25 replicas**, are **not this Quick setup** [C2]. | Funnel has non-configurable bandwidth limits without a numeric rate disclosed in [T3]. Direct mesh, DERP, Peer Relay and Funnel must not be conflated. |
@@ -394,7 +394,7 @@ this VPS pair, nor a speed ranking against the measured products.
 ## Earlier project-only evidence
 
 The [original FRP-only records](benchmark-results/2026-10-05-hetzner.json) and
-[their original methodology](https://github.com/0xprincess/frp-tunnel/blob/2ca728a8c3a489368cba406fbc86a1e66a00e38d/docs/comparison.md)
+[their original methodology](https://github.com/0xprincess/rbridge/blob/d25877d19a16e7b514591a81094becbe2bcd35a4/docs/comparison.md)
 remain available. That pair had an Intel relay/AMD origin. Its Internet/SOCKS
 workstation transfers, 128 MiB POST and five explicit FRP transport restarts were
 **not rerun as matched three-product experiments**. All five old FRP connections

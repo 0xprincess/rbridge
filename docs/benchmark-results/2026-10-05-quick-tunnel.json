@@ -2,7 +2,7 @@
   "schema_version": 2,
   "date_utc": "2026-10-05",
   "captured_at_utc": "2026-10-05T04:58:16.328669+00:00",
-  "project_commit": "2ca728a8c3a489368cba406fbc86a1e66a00e38d",
+  "project_commit": "d25877d19a16e7b514591a81094becbe2bcd35a4",
   "scope": "Matched direct, FRP and Cloudflare Quick Tunnel measurements on the same two VMs. Tailscale not measured.",
   "visitor": "relay VPS, local public FRP ingress versus Cloudflare edge path",
   "metadata": {

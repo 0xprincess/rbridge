@@ -12,9 +12,10 @@ or deployment even when they are not authentication secrets.
 2. Run `python scripts/check-privacy.py --staged`.
 3. Review commit author and committer metadata. Use the generic repository-local
    identity in the README if you do not want to publish yours.
-4. Before publication, run `python scripts/check-privacy.py --history
-   --anonymous-history` and inspect history, branches, tags, signing metadata,
-   screenshots, logs, generated artifacts, and references manually.
+4. Before publication, run `python scripts/check-privacy.py --history` (add
+   `--anonymous-history` if every commit should use the generic identity) and
+   inspect history, branches, tags, signing metadata, screenshots, logs,
+   generated artifacts, and references manually.
 5. Confirm that no generated inputs were staged with `git add -f` and that no
    credentials appear in remote URLs. A local SSH key must never become a Git blob.
 

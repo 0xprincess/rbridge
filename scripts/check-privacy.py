@@ -70,7 +70,7 @@ def check(staged=False, history=False, anonymous=False):
                 failures += 1
     if anonymous:
         metadata = git("log", "--all", "--format=%an%x00%ae%x00%cn%x00%ce").splitlines()
-        expected = [b"FRP Tunnel contributors", b"contributors@example.invalid"] * 2
+        expected = [b"rbridge contributors", b"contributors@example.invalid"] * 2
         if any(line.split(b"\0") != expected for line in metadata):
             print("history: author or committer metadata is not the generic project identity")
             failures += 1
