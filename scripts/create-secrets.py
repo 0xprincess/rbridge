@@ -81,7 +81,7 @@ def generate(args):
     destination.chmod(0o700)
     for name in (("relay", "login") if managed else ("relay",)):
         subprocess.run(
-            [keygen, "-q", "-t", "ed25519", "-N", "", "-C", f"frp-tunnel {name}",
+            [keygen, "-q", "-t", "ed25519", "-N", "", "-C", f"rbridge {name}",
              "-f", str(destination / f"{name}_id_ed25519")],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         )

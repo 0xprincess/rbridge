@@ -4,13 +4,13 @@
     name: "{{ frp_relay_user }}"
     system: true
     create_home: true
-    home: "/var/lib/frp-tunnel-relay"
+    home: "/var/lib/rbridge-relay"
     shell: /usr/sbin/nologin
     password_lock: true
 
 - name: Restrict the relay home directory
   ansible.builtin.file:
-    path: /var/lib/frp-tunnel-relay
+    path: /var/lib/rbridge-relay
     state: directory
     owner: "{{ frp_relay_user }}"
     group: "{{ frp_relay_user }}"
@@ -18,7 +18,7 @@
 
 - name: Create the relay SSH directory
   ansible.builtin.file:
-    path: /var/lib/frp-tunnel-relay/.ssh
+    path: /var/lib/rbridge-relay/.ssh
     state: directory
     owner: "{{ frp_relay_user }}"
     group: "{{ frp_relay_user }}"
@@ -27,7 +27,7 @@
 - name: Install only the restricted forwarding key for the relay account
   ansible.builtin.copy:
     content: 'restrict,port-forwarding,permitopen="127.0.0.1:{{ frp_server_port | int }}" {{ frp_relay_public_key | trim }}{{ "\n" }}'
-    dest: /var/lib/frp-tunnel-relay/.ssh/authorized_keys
+    dest: /var/lib/rbridge-relay/.ssh/authorized_keys
     owner: "{{ frp_relay_user }}"
     group: "{{ frp_relay_user }}"
     mode: "0600"
@@ -37,7 +37,7 @@
 - name: Restrict SSH forwarding for the project relay account
   ansible.builtin.template:
     src: sshd-relay.conf.j2
-    dest: /etc/ssh/sshd_config.d/00-frp-tunnel.conf
+    dest: /etc/ssh/sshd_config.d/00-rbridge.conf
     owner: root
     group: root
     mode: "0644"
@@ -78,7 +78,7 @@
 - name: Install the loopback-only FRP server configuration
   ansible.builtin.template:
     src: frps.toml.j2
-    dest: /etc/frp-tunnel/frps.toml
+    dest: /etc/rbridge/frps.toml
     owner: root
     group: "{{ frp_service_user }}"
     mode: "0640"
@@ -89,8 +89,8 @@
 
 - name: Install the FRP server service
   ansible.builtin.template:
-    src: frp-tunnel-server.service.j2
-    dest: /etc/systemd/system/frp-tunnel-server.service
+    src: rbridge-server.service.j2
+    dest: /etc/systemd/system/rbridge-server.service
     owner: root
     group: root
     mode: "0644"
@@ -101,7 +101,7 @@
 
 - name: Enable the FRP server at boot
   ansible.builtin.systemd_service:
-    name: frp-tunnel-server
+    name: rbridge-server
     enabled: true
     state: started
     daemon_reload: true

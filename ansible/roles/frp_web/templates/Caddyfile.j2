@@ -1,6 +1,6 @@
-# Owned exclusively by frp-tunnel; never imports /etc/caddy configuration.
+# Owned exclusively by rbridge; never imports /etc/caddy configuration.
 {
-	admin unix//run/frp-tunnel-web/admin.sock
+	admin unix//run/rbridge-web/admin.sock
 	persist_config off
 	skip_install_trust
 {% if frp_web_acme_email | length %}

@@ -44,7 +44,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("public", "basic", "app", "oidc", "secure", "idp")
-CA_PATH = "/var/lib/frp-tunnel-web/data/caddy/pki/authorities/local/root.crt"
+CA_PATH = "/var/lib/rbridge-web/data/caddy/pki/authorities/local/root.crt"
 ARTIFACTS = None
 
 
@@ -226,8 +226,8 @@ class Suite:
                         " '127.0.0.1 origin.fixture.test # frp-field-test' >> /etc/hosts; update-ca-certificates")
         # Go caches system roots within the Caddy process. A recovered run has a
         # newly generated fixture CA; reload alone would retain the old roots.
-        self.remote("relay", "if systemctl is-active --quiet frp-tunnel-web.service; "
-                    "then systemctl restart frp-tunnel-web.service; fi")
+        self.remote("relay", "if systemctl is-active --quiet rbridge-web.service; "
+                    "then systemctl restart rbridge-web.service; fi")
         self.remote("client", "(command -v docker >/dev/null || "
                     "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io) && systemctl start docker")
         for name in ("origin.crt", "origin.key"):
@@ -527,17 +527,17 @@ class Suite:
     def faults(self):
         self.doctor("client")
         self.doctor("relay")
-        self.remote("client", "systemctl stop frp-tunnel-transport")
+        self.remote("client", "systemctl stop rbridge-transport")
         try:
             self.doctor("client", "transport")
         finally:
-            self.remote("client", "systemctl start frp-tunnel-transport")
+            self.remote("client", "systemctl start rbridge-transport")
         eventually(self.tcp, "SSH transport restart did not recover both TCP services")
-        self.remote("client", "systemctl stop frp-tunnel-client")
+        self.remote("client", "systemctl stop rbridge-client")
         try:
             self.doctor("client", "registration")
         finally:
-            self.remote("client", "systemctl start frp-tunnel-client")
+            self.remote("client", "systemctl start rbridge-client")
         eventually(self.tcp, "FRP client restart did not recover both TCP services")
         self.remote("client", "systemctl stop frp-field-origin")
         try:
@@ -545,22 +545,22 @@ class Suite:
         finally:
             self.remote("client", "systemctl start frp-field-origin")
         eventually(lambda: self.http("public"), "Origin restart did not recover web publication")
-        self.remote("relay", "systemctl stop frp-tunnel-web")
+        self.remote("relay", "systemctl stop rbridge-web")
         try:
             self.doctor("client", "public_ingress")
         finally:
-            self.remote("relay", "systemctl start frp-tunnel-web")
+            self.remote("relay", "systemctl start rbridge-web")
         eventually(lambda: self.http("public"), "Web ingress restart did not recover")
         self.mark("transport/registration/backend/ingress fault diagnostics and restart recovery")
 
     def validation(self):
         snapshot = '''import hashlib,json
 from pathlib import Path
-paths = [Path('/etc/frp-tunnel'), Path('/etc/systemd/system')]
+paths = [Path('/etc/rbridge'), Path('/etc/systemd/system')]
 result = {}
 for root in paths:
  for path in sorted(root.rglob('*')):
-  if path.is_file() and (root.name == 'frp-tunnel' or path.name.startswith('frp-tunnel')):
+  if path.is_file() and (root.name == 'rbridge' or path.name.startswith('rbridge')):
    s = path.stat(); result[str(path)] = [hashlib.sha256(path.read_bytes()).hexdigest(),s.st_mtime_ns,s.st_mode]
 print(json.dumps(result,sort_keys=True))
 '''
@@ -608,12 +608,12 @@ print(json.dumps(result,sort_keys=True))
         # Even an explicit subsequent client-only apply must not route newly
         # registered backends through the relay's previous public access policy.
         self.deploy(revised, limit="frp_clients")
-        self.remote("client", "systemctl restart frp-tunnel-client")
+        self.remote("client", "systemctl restart rbridge-client")
         self.closed(443)
         if self.args.local:
             # Inventory aliases share a token file on this one-VM fixture.
             # Restart from the restored token rather than retaining its cache.
-            self.remote("client", "systemctl stop frp-tunnel-client")
+            self.remote("client", "systemctl stop rbridge-client")
         self.deploy()
         eventually(lambda: self.http("public"), "Web ingress did not recover after the failed rollout")
         self.mark("failed relay web rollout cannot publish a new revision under the old access policy")
@@ -633,9 +633,9 @@ print(json.dumps(result,sort_keys=True))
         public["relay_port"] = oidc["relay_port"]
         self.http("basic", status=401)
         self.http("basic", credentials="field:" + self.password)
-        client_files = "/etc/frp-tunnel/frpc.toml"
+        client_files = "/etc/rbridge/frpc.toml"
         if not self.args.local:
-            client_files += " /etc/frp-tunnel/token"
+            client_files += " /etc/rbridge/token"
         client_before = self.remote("client", "sha256sum " + client_files).stdout
         with socket.create_connection((self.address, 2233), timeout=5) as persistent:
             persistent.sendall(b"before-revision")
@@ -650,17 +650,17 @@ print(json.dumps(result,sort_keys=True))
                 pass
             except TimeoutError:
                 raise Failure("Old revision retained an established data connection") from None
-        self.remote("relay", "systemctl is-active frp-tunnel-publish-basic.socket")
+        self.remote("relay", "systemctl is-active rbridge-publish-basic.socket")
         listeners = self.remote("relay", "ss -lntH").stdout.decode().splitlines()
         require(any(line.split()[3] == "0.0.0.0:" + str(published["public_port"]) for line in listeners),
                 "Public TCP socket did not bind the removed OIDC listener port")
-        state = self.remote("relay", "systemctl is-active frp-tunnel-oidc-oidc", allow_failure=True)
+        state = self.remote("relay", "systemctl is-active rbridge-oidc-oidc", allow_failure=True)
         require(state.returncode != 0, "Removed OIDC process still owns its old listener")
         if not self.args.local:
             # A restarted old origin must still be unable to register, not merely
             # the old process that was disconnected during the server restart.
-            self.remote("client", "systemctl restart frp-tunnel-client")
-        # The one-VM fixture shares /etc/frp-tunnel/token between inventory aliases;
+            self.remote("client", "systemctl restart rbridge-client")
+        # The one-VM fixture shares /etc/rbridge/token between inventory aliases;
         # keep its old running FRPC credential rather than reread the relay file.
         # In either mode observe reconnect attempts, not only the first refused SYN.
         request = f"GET / HTTP/1.1\r\nHost: basic.{self.domain}\r\nConnection: close\r\n\r\n".encode()
@@ -712,9 +712,9 @@ print(json.dumps(result,sort_keys=True))
         removed = {80, 443, 14180, 12222, 12300, 12301, 12302, 12303, 12304, 12305}
         require(not any(int(line.split()[3].rsplit(":", 1)[1]) in removed for line in listeners),
                 "Removed service retained a relay loopback listener")
-        state = self.remote("client", "systemctl is-active frp-tunnel-sshd", allow_failure=True)
+        state = self.remote("client", "systemctl is-active rbridge-sshd", allow_failure=True)
         require(state.returncode != 0, "Optional managed SSH still running")
-        state = self.remote("relay", "systemctl is-active frp-tunnel-oidc-oidc", allow_failure=True)
+        state = self.remote("relay", "systemctl is-active rbridge-oidc-oidc", allow_failure=True)
         require(state.returncode != 0, "Removed OIDC instance still running")
         with socket.create_connection((self.address, 2233), timeout=5) as connection:
             connection.sendall(b"surviving-service")

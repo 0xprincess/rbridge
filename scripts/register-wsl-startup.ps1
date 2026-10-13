@@ -6,7 +6,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$taskName = "FRP tunnel - $Distribution"
+$taskName = "rbridge - $Distribution"
 if ($Remove) {
     Stop-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
@@ -14,13 +14,13 @@ if ($Remove) {
     return
 }
 
-& "$env:SystemRoot\System32\wsl.exe" -d $Distribution -u root --exec test -x /usr/local/sbin/frp-tunnel-keepalive
+& "$env:SystemRoot\System32\wsl.exe" -d $Distribution -u root --exec test -x /usr/local/sbin/rbridge-keepalive
 if ($LASTEXITCODE -ne 0) {
     throw 'Deploy the client role inside the selected WSL distribution first.'
 }
 $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $action = New-ScheduledTaskAction -Execute "$env:SystemRoot\System32\wsl.exe" `
-    -Argument "-d $Distribution -u root --exec /usr/local/sbin/frp-tunnel-keepalive"
+    -Argument "-d $Distribution -u root --exec /usr/local/sbin/rbridge-keepalive"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $identity
 $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
 $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) `

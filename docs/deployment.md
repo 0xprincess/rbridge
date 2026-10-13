@@ -29,7 +29,7 @@ blocks can conflict. The main configuration must include
 `/etc/ssh/sshd_config.d/*.conf`. Resolve conflicts deliberately, retaining an
 administration session.
 
-The role installs an account-scoped `00-frp-tunnel.conf` and a key with
+The role installs an account-scoped `00-rbridge.conf` and a key with
 `restrict,port-forwarding` and one `permitopen` destination: loopback FRP control.
 The account has a locked password and `nologin` shell. Command execution, remote
 forwarding and Unix socket forwarding are denied. The complete native SSH
@@ -40,7 +40,7 @@ configuration and effective account policy are checked before reload.
 The recommended front door is the installed `rbridge` command. Follow the README's
 `init` instructions once, then use `publish`, `plan`, `apply`, `list`, `status`
 and `remove`. Every command accepts `--private-dir`; otherwise it uses `$PRIVATE`
-or `~/.config/frp-tunnel-private`. Install with `sh install.sh` from a checkout;
+or `~/.config/rbridge-private`. Install with `sh install.sh` from a checkout;
 the installed command bundles its own Python environment and Ansible roles and
 works from any directory. Contributors may still run `python scripts/bridge.py`
 in a source virtualenv. The workspace must be owned by the invoking user, outside
@@ -181,7 +181,7 @@ reachable LAN hosts; the SSH tunnel protects origin-to-relay traffic, not an
 unencrypted LAN hop from the origin to another backend.
 
 Each service becomes a raw FRP TCP proxy bound to relay loopback. TCP services
-add `frp-tunnel-publish-NAME.socket` and `.service`, using systemd-socket-proxyd.
+add `rbridge-publish-NAME.socket` and `.service`, using systemd-socket-proxyd.
 HTTP services do not get public raw listeners: Caddy alone forwards to them.
 Removing a service removes its generated publication units and FRP listener.
 Raw TCP publishing does not add TLS, authentication, or application authorization.
@@ -202,7 +202,7 @@ public IPv6 listeners.
 | `frp_client_admin_port` | 17400 | Authenticated client-loopback status API |
 | `frp_server_admin_port` | 17401 | Authenticated relay-loopback status API |
 | `frp_admin_user` | frp-doctor | Local status API identity |
-| `frp_service_user` | frp-tunnel | FRP/transport account |
+| `frp_service_user` | rbridge | FRP/transport account |
 | `frp_relay_user` | frp-relay | Restricted relay forwarding account |
 | `frp_version` | 0.71.0 | Pinned FRP release |
 | `frp_web_tls` | acme | Public certificates; `internal` is explicit test/private-PKI mode |
@@ -236,17 +236,17 @@ outbound DNS/ACME traffic. Caddy obtains and renews certificates automatically;
 HTTP redirects to HTTPS. Configure only DNS you control and can validate.
 Wildcards and DNS-provider API automation are not implemented.
 
-The dedicated `frp-tunnel-web` unit uses its own pinned Caddy binary and
-`/etc/frp-tunnel/web/Caddyfile`; it does not import/adopt `/etc/caddy` or replace
+The dedicated `rbridge-web` unit uses its own pinned Caddy binary and
+`/etc/rbridge/web/Caddyfile`; it does not import/adopt `/etc/caddy` or replace
 an unrelated Caddy service. An existing listener on 80/443 must be handled by the
-administrator. Certificates persist in `/var/lib/frp-tunnel-web`, including when
+administrator. Certificates persist in `/var/lib/rbridge-web`, including when
 the final web publication is removed, so later re-enablement retains state.
 
 HTTPS terminates at the relay. The relay can read HTTP traffic; it is not an
 end-to-end encrypted web service from browser to origin. HTTPS backends still
 receive certificate-chain and hostname verification using the `backend` host as
 TLS identity. Install a private backend CA in the relay's normal OS trust store
-when appropriate, then restart `frp-tunnel-web` to reload cached system roots;
+when appropriate, then restart `rbridge-web` to reload cached system roots;
 a configuration reload alone is insufficient after CA rotation. There is no
 insecure-verification switch. The application
 receives its public hostname as `Host`. WebSockets and streaming are supported.
@@ -254,7 +254,7 @@ receives its public hostname as `Host`. WebSockets and streaming are supported.
 `frp_web_tls: internal` uses Caddy's local CA, not a browser-trusted public
 certificate. Distribute and trust its root deliberately; the role does not
 silently change system/browser trust. Its root is at
-`/var/lib/frp-tunnel-web/data/caddy/pki/authorities/local/root.crt`.
+`/var/lib/rbridge-web/data/caddy/pki/authorities/local/root.crt`.
 
 ## Web access policies
 
@@ -265,7 +265,7 @@ Each HTTP service must select exactly one mode:
   headers are preserved. The tunnel does not implement or verify your app's login.
 - `mode: basic`: add `access.users`, a mapping of usernames to bcrypt hashes.
   Generate hashes privately with Caddy's interactive `hash-password --algorithm
-  bcrypt` command (pinned binary under `/usr/local/lib/frp-tunnel/caddy-2.11.7`).
+  bcrypt` command (pinned binary under `/usr/local/lib/rbridge/caddy-2.11.7`).
   Do not pass plaintext passwords through command-line arguments. Caddy validates
   credentials over HTTPS, removes the incoming Authorization header, and forwards
   its authenticated username in `X-Auth-Request-User`.
@@ -306,29 +306,18 @@ identical inputs is intended to produce zero changes; runtime configuration is
 validated before replacement. Manifest/policy or FRP-token changes revoke all tunnel
 registrations and can disconnect unrelated services sharing this tunnel.
 
-For an existing `v0.1` installation:
-
-1. Preserve the old inventory/secrets outside the checkout.
-2. Replace `frp_public_ssh_port` with the named SSH `frp_services` entry shown in
-   the README. Choose a free, separate `relay_port` (for example 12222).
-3. Add a fresh `frp_admin_password` to private secrets. Keep existing relay/login
-   keys, token and pins unless deliberately rotating them on both hosts.
-4. Validate and deploy both hosts. The new FRP server moves application listeners
-   to loopback before enabling public socket proxies.
-
-There is no legacy `frp_public_ssh_port` alias. The tag preserves source, not a
-snapshot of installed machines. To inspect/redeploy the baseline:
+The tag preserves source, not a snapshot of installed machines. To
+inspect/redeploy the baseline:
 
 ```bash
 git worktree add --detach ../rbridge-v0.1 v0.1
 ```
 
-Before running the old roles, stop and disable the newer relay publication and
-web/authenticator units (`frp-tunnel-publish-*.socket`,
-`frp-tunnel-publish-*.service`, `frp-tunnel-web.service`,
-`frp-tunnel-oidc-*.service`). Review installed units and act only on this project's
-owned resources. Remove their owned unit files and run `systemctl daemon-reload`
-so a later reboot cannot restore conflicting listeners. Redeploy `v0.1` from the
+Before running the old roles, stop and disable every `rbridge-*` unit on both
+hosts; `v0.1` installs differently named units that would otherwise conflict on
+the same listeners. Review installed units and act only on this project's owned
+resources. Remove their owned unit files and run `systemctl daemon-reload` so a
+later reboot cannot restore conflicting listeners. Redeploy `v0.1` from the
 separate worktree using the preserved old inputs. Its roles will not remove
 newer units automatically. Retain certificate storage privately if needed.
 

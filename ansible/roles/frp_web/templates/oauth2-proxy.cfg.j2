@@ -19,7 +19,7 @@ insecure_oidc_skip_issuer_verification = false
 ssl_insecure_skip_verify = false
 email_domains = {{ app.access.allowed_domains | default([]) | to_json }}
 {% if app.access.allowed_emails | default([]) | length %}
-authenticated_emails_file = "/etc/frp-tunnel/web/oidc-{{ app.name }}/emails"
+authenticated_emails_file = "/etc/rbridge/web/oidc-{{ app.name }}/emails"
 {% endif %}
 # Auth-only static upstream is never an application route. Caddy proxies the
 # actual request only after /oauth2/auth returns success.

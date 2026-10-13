@@ -54,7 +54,7 @@ def main():
         mask_tree(value)
         parsed[name] = value
     tunnel.validate_config({**parsed["TUNNEL_SERVICES"], **parsed["TUNNEL_SECRETS"]})
-    destination = Path(os.environ["RUNNER_TEMP"]) / "frp-tunnel"
+    destination = Path(os.environ["RUNNER_TEMP"]) / "rbridge"
     destination.mkdir(mode=0o700, exist_ok=False)
     for name, filename in required.items():
         path = destination / filename

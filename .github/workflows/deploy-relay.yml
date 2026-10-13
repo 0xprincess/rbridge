@@ -36,12 +36,12 @@ jobs:
         env:
           ANSIBLE_CONFIG: ansible/ansible.cfg
         run: |
-          export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/frp-tunnel/known_hosts -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
+          export ANSIBLE_SSH_ARGS="-F /dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$RUNNER_TEMP/rbridge/known_hosts -o GlobalKnownHostsFile=/dev/null -o ForwardAgent=no -o ProxyCommand=none -o ProxyJump=none"
           ansible-playbook \
-            -i "$RUNNER_TEMP/frp-tunnel/inventory.yml" \
-            -e "@$RUNNER_TEMP/frp-tunnel/services.yml" \
-            -e "@$RUNNER_TEMP/frp-tunnel/secrets.yml" \
-            --private-key "$RUNNER_TEMP/frp-tunnel/admin.key" \
+            -i "$RUNNER_TEMP/rbridge/inventory.yml" \
+            -e "@$RUNNER_TEMP/rbridge/services.yml" \
+            -e "@$RUNNER_TEMP/rbridge/secrets.yml" \
+            --private-key "$RUNNER_TEMP/rbridge/admin.key" \
             --limit frp_servers ansible/deploy.yml
       - name: Remove private runner files
         if: always()
@@ -50,7 +50,7 @@ jobs:
           import os
           from pathlib import Path
           import shutil
-          path = Path(os.environ['RUNNER_TEMP']) / 'frp-tunnel'
+          path = Path(os.environ['RUNNER_TEMP']) / 'rbridge'
           if path.exists():
               shutil.rmtree(path)
           PY

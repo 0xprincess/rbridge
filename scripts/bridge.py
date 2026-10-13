@@ -349,7 +349,7 @@ Everyday publishing (hostname DNS must point to the relay):
   rbridge status --json
   rbridge remove demo
 Publish/remove deploy by default; --dry-run previews without changing files or hosts.
-Commands use $PRIVATE or ~/.config/frp-tunnel-private. Endpoint disclosure is opt-in.
+Commands use $PRIVATE or ~/.config/rbridge-private. Endpoint disclosure is opt-in.
 Systemd publications outlive this CLI; WSL must remain awake. DNS/firewall/cloud provisioning
 and full infrastructure uninstall remain operator-owned. Run tunnel.py for advanced diagnostics.""")
     commands = result.add_subparsers(dest="command", required=True)
@@ -361,8 +361,8 @@ and full infrastructure uninstall remain operator-owned. Run tunnel.py for advan
                             ("status", "Check public ingress, or diagnose an explicitly selected local role"),
                             ("remove", "Remove a publication; use --dry-run to preview")):
         command = commands.add_parser(name, help=help_text, description=help_text)
-        command.add_argument("--private-dir", default=os.environ.get("PRIVATE", str(Path.home() / ".config/frp-tunnel-private")),
-                             help="Private workspace (default: $PRIVATE or ~/.config/frp-tunnel-private)")
+        command.add_argument("--private-dir", default=os.environ.get("PRIVATE", str(Path.home() / ".config/rbridge-private")),
+                             help="Private workspace (default: $PRIVATE or ~/.config/rbridge-private)")
         command.add_argument("--json", action="store_true", help="One redacted JSON result on stdout; apply previews go to stderr")
         command.add_argument("--show-endpoints", action="store_true", help="Explicitly reveal service names/endpoints and connection instructions locally, never secrets")
         if name in ("publish", "remove", "apply"):

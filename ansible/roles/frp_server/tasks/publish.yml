@@ -8,14 +8,14 @@
   ansible.builtin.find:
     paths: /etc/systemd/system
     patterns:
-      - frp-tunnel-publish-*.socket
-      - frp-tunnel-publish-*.service
+      - rbridge-publish-*.socket
+      - rbridge-publish-*.service
     file_type: file
   register: frp_publish_existing
 
 - name: Identify obsolete generated listener units
   ansible.builtin.set_fact:
-    frp_publish_desired: "{{ (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/frp-tunnel-publish-\\1.socket') | list) + (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/frp-tunnel-publish-\\1.service') | list) }}"
+    frp_publish_desired: "{{ (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/rbridge-publish-\\1.socket') | list) + (frp_tcp_services | map(attribute='name') | map('regex_replace', '^(.*)$', '/etc/systemd/system/rbridge-publish-\\1.service') | list) }}"
 
 - name: Stop obsolete public sockets before changing FRP listeners
   ansible.builtin.systemd_service:
@@ -39,8 +39,8 @@
 
 - name: Install explicit TCP socket units
   ansible.builtin.template:
-    src: frp-tunnel-publish.socket.j2
-    dest: "/etc/systemd/system/frp-tunnel-publish-{{ item.name }}.socket"
+    src: rbridge-publish.socket.j2
+    dest: "/etc/systemd/system/rbridge-publish-{{ item.name }}.socket"
     owner: root
     group: root
     mode: "0644"
@@ -51,8 +51,8 @@
 
 - name: Install unprivileged socket forwarding units
   ansible.builtin.template:
-    src: frp-tunnel-publish.service.j2
-    dest: "/etc/systemd/system/frp-tunnel-publish-{{ item.name }}.service"
+    src: rbridge-publish.service.j2
+    dest: "/etc/systemd/system/rbridge-publish-{{ item.name }}.service"
     owner: root
     group: root
     mode: "0644"
@@ -68,12 +68,12 @@
 
 - name: Stop changed public sockets before rebinding ports
   ansible.builtin.systemd_service:
-    name: "frp-tunnel-publish-{{ item }}.socket"
+    name: "rbridge-publish-{{ item }}.socket"
     state: stopped
   loop: "{{ (frp_publish_sockets.results + frp_publish_services.results) | selectattr('changed') | map(attribute='item.name') | unique | list }}"
 
 - name: Stop changed proxy processes before changing forwarding destinations
   ansible.builtin.systemd_service:
-    name: "frp-tunnel-publish-{{ item }}.service"
+    name: "rbridge-publish-{{ item }}.service"
     state: stopped
   loop: "{{ (frp_publish_sockets.results + frp_publish_services.results) | selectattr('changed') | map(attribute='item.name') | unique | list }}"

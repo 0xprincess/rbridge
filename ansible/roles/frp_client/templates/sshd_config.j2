@@ -2,8 +2,8 @@
 Port {{ frp_backend_ssh_port | int }}
 ListenAddress 127.0.0.1
 HostKey /etc/ssh/ssh_host_ed25519_key
-PidFile /run/frp-tunnel-sshd/sshd.pid
-AuthorizedKeysFile /etc/frp-tunnel/login_authorized_keys
+PidFile /run/rbridge-sshd/sshd.pid
+AuthorizedKeysFile /etc/rbridge/login_authorized_keys
 AllowUsers {{ frp_login_user }}
 PubkeyAuthentication yes
 AuthenticationMethods publickey

@@ -7,7 +7,7 @@ frp_checksums:
 frp_architectures:
   x86_64: amd64
   aarch64: arm64
-frp_service_user: frp-tunnel
+frp_service_user: rbridge
 frp_relay_user: frp-relay
 frp_server_port: 7000
 frp_forward_port: 17001

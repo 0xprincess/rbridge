@@ -2,7 +2,7 @@
 - name: Install the relay private key
   ansible.builtin.copy:
     content: "{{ frp_relay_private_key | trim }}\n"
-    dest: /etc/frp-tunnel/relay.key
+    dest: /etc/rbridge/relay.key
     owner: "{{ frp_service_user }}"
     group: "{{ frp_service_user }}"
     mode: "0600"
@@ -13,7 +13,7 @@
 - name: Install verified relay host keys
   ansible.builtin.copy:
     content: "{{ frp_relay_known_hosts | trim }}\n"
-    dest: /etc/frp-tunnel/known_hosts
+    dest: /etc/rbridge/known_hosts
     owner: root
     group: "{{ frp_service_user }}"
     mode: "0640"
@@ -24,7 +24,7 @@
 - name: Install the public key for the dedicated tunneled SSH service
   ansible.builtin.copy:
     content: "{{ frp_login_public_key | trim }}\n"
-    dest: /etc/frp-tunnel/login_authorized_keys
+    dest: /etc/rbridge/login_authorized_keys
     owner: root
     group: root
     mode: "0644"
@@ -44,7 +44,7 @@
 - name: Install the isolated key-only SSH configuration
   ansible.builtin.template:
     src: sshd_config.j2
-    dest: /etc/frp-tunnel/sshd_config
+    dest: /etc/rbridge/sshd_config
     owner: root
     group: root
     mode: "0644"
@@ -57,7 +57,7 @@
 - name: Install the FRP client configuration
   ansible.builtin.template:
     src: frpc.toml.j2
-    dest: /etc/frp-tunnel/frpc.toml
+    dest: /etc/rbridge/frpc.toml
     owner: root
     group: "{{ frp_service_user }}"
     mode: "0640"
@@ -73,7 +73,7 @@
     owner: root
     group: root
     mode: "0644"
-  loop: "{{ ['frp-tunnel-transport.service', 'frp-tunnel-client.service'] + (['frp-tunnel-sshd.service'] if frp_managed_ssh else []) }}"
+  loop: "{{ ['rbridge-transport.service', 'rbridge-client.service'] + (['rbridge-sshd.service'] if frp_managed_ssh else []) }}"
   no_log: true
   diff: false
   notify:
@@ -83,13 +83,13 @@
 
 - name: Inspect the previously managed SSH unit
   ansible.builtin.stat:
-    path: /etc/systemd/system/frp-tunnel-sshd.service
+    path: /etc/systemd/system/rbridge-sshd.service
   register: frp_old_sshd_unit
   when: not frp_managed_ssh
 
 - name: Stop the disabled managed SSH listener
   ansible.builtin.systemd_service:
-    name: frp-tunnel-sshd.service
+    name: rbridge-sshd.service
     state: stopped
     enabled: false
   when:
@@ -112,9 +112,9 @@
     path: "{{ item }}"
     state: absent
   loop:
-    - /etc/systemd/system/frp-tunnel-sshd.service
-    - /etc/frp-tunnel/sshd_config
-    - /etc/frp-tunnel/login_authorized_keys
+    - /etc/systemd/system/rbridge-sshd.service
+    - /etc/rbridge/sshd_config
+    - /etc/rbridge/login_authorized_keys
   when: not frp_managed_ssh
   register: frp_removed_sshd
 
@@ -125,8 +125,8 @@
 
 - name: Install the WSL keepalive helper
   ansible.builtin.template:
-    src: frp-tunnel-keepalive.j2
-    dest: /usr/local/sbin/frp-tunnel-keepalive
+    src: rbridge-keepalive.j2
+    dest: /usr/local/sbin/rbridge-keepalive
     owner: root
     group: root
     mode: "0755"
@@ -140,4 +140,4 @@
     enabled: true
     state: started
     daemon_reload: true
-  loop: "{{ (['frp-tunnel-sshd'] if frp_managed_ssh else []) + ['frp-tunnel-transport', 'frp-tunnel-client'] }}"
+  loop: "{{ (['rbridge-sshd'] if frp_managed_ssh else []) + ['rbridge-transport', 'rbridge-client'] }}"

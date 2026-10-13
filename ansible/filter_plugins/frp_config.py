@@ -236,7 +236,7 @@ def revision_token(base_token, services, oidc=None):
     if any(service.get("access", {}).get("mode") == "oidc" for service in services):
         manifest["oidc"] = oidc
     canonical = json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
-    return hmac.new(bytes.fromhex(base_token), b"frp-tunnel-service-revision-v1\0" + canonical,
+    return hmac.new(bytes.fromhex(base_token), b"rbridge-service-revision-v1\0" + canonical,
                     hashlib.sha256).hexdigest()
 
 

@@ -4,23 +4,23 @@
 
 - name: Inspect the project configuration directory
   ansible.builtin.stat:
-    path: /etc/frp-tunnel/.managed
+    path: /etc/rbridge/.managed
   register: frp_marker
 
 - name: Inspect an existing project directory
   ansible.builtin.stat:
-    path: /etc/frp-tunnel
+    path: /etc/rbridge
   register: frp_existing
 
 - name: Refuse to adopt unrelated configuration
   ansible.builtin.assert:
     that:
       - not frp_existing.stat.exists or frp_marker.stat.exists
-    fail_msg: /etc/frp-tunnel exists without the project ownership marker.
+    fail_msg: /etc/rbridge exists without the project ownership marker.
 
 - name: Read existing managed account names
   ansible.builtin.slurp:
-    src: /etc/frp-tunnel/.managed
+    src: /etc/rbridge/.managed
   register: frp_account_marker
   when: frp_marker.stat.exists
   no_log: true
@@ -82,14 +82,14 @@
     group: root
     mode: "0755"
   loop:
-    - /etc/frp-tunnel
-    - /var/cache/frp-tunnel
-    - "/usr/local/lib/frp-tunnel/{{ frp_version }}"
+    - /etc/rbridge
+    - /var/cache/rbridge
+    - "/usr/local/lib/rbridge/{{ frp_version }}"
 
 - name: Mark the configuration directory as project managed
   ansible.builtin.copy:
     content: "{{ {'service_user': frp_service_user, 'relay_user': frp_relay_user} | to_json }}\n"
-    dest: /etc/frp-tunnel/.managed
+    dest: /etc/rbridge/.managed
     owner: root
     group: root
     mode: "0644"
@@ -99,12 +99,12 @@
 - name: Select the release architecture
   ansible.builtin.set_fact:
     frp_arch: "{{ frp_architectures[ansible_facts['architecture']] }}"
-    frp_binary_dir: "/usr/local/lib/frp-tunnel/{{ frp_version }}"
+    frp_binary_dir: "/usr/local/lib/rbridge/{{ frp_version }}"
 
 - name: Download the pinned upstream release without a proxy
   ansible.builtin.get_url:
     url: "https://github.com/fatedier/frp/releases/download/v{{ frp_version }}/frp_{{ frp_version }}_linux_{{ frp_arch }}.tar.gz"
-    dest: "/var/cache/frp-tunnel/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
+    dest: "/var/cache/rbridge/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
     checksum: "sha256:{{ frp_checksums[frp_version][frp_arch] }}"
     use_proxy: false
     use_netrc: false
@@ -115,7 +115,7 @@
 
 - name: Extract the verified release
   ansible.builtin.unarchive:
-    src: "/var/cache/frp-tunnel/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
+    src: "/var/cache/rbridge/frp_{{ frp_version }}_{{ frp_arch }}.tar.gz"
     dest: "{{ frp_binary_dir }}"
     remote_src: true
     extra_opts:
@@ -130,7 +130,7 @@
 - name: Preview the revision-bound authentication token change
   ansible.builtin.copy:
     content: "{{ frp_token | frp_revision_token(frp_services_normalized, frp_oidc | default(none)) }}\n"
-    dest: /etc/frp-tunnel/token
+    dest: /etc/rbridge/token
     owner: "{{ frp_service_user }}"
     group: "{{ frp_service_user }}"
     mode: "0600"
@@ -150,7 +150,7 @@
 
     - name: Inspect existing web ownership
       ansible.builtin.stat:
-        path: /etc/frp-tunnel/web/.managed
+        path: /etc/rbridge/web/.managed
       register: frp_old_web_marker
 
     - name: Stop old ingress before accepting the new revision
@@ -158,16 +158,16 @@
         name: "{{ item }}"
         state: stopped
       loop:
-        - frp-tunnel-web.service
-        - frp-tunnel-server.service
+        - rbridge-web.service
+        - rbridge-server.service
       when:
         - item in ansible_facts.services
-        - item != 'frp-tunnel-web.service' or frp_old_web_marker.stat.exists
+        - item != 'rbridge-web.service' or frp_old_web_marker.stat.exists
 
 - name: Install the private revision-bound authentication token
   ansible.builtin.copy:
     content: "{{ frp_token | frp_revision_token(frp_services_normalized, frp_oidc | default(none)) }}\n"
-    dest: /etc/frp-tunnel/token
+    dest: /etc/rbridge/token
     owner: "{{ frp_service_user }}"
     group: "{{ frp_service_user }}"
     mode: "0600"

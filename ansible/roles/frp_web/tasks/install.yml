@@ -2,15 +2,15 @@
 - name: Select dedicated release paths
   ansible.builtin.set_fact:
     frp_web_arch: "{{ frp_web_architectures[ansible_facts['architecture']] }}"
-    frp_web_caddy_binary: "/usr/local/lib/frp-tunnel/caddy-{{ frp_web_caddy_version }}/caddy"
-    frp_web_oauth2_binary: "/usr/local/lib/frp-tunnel/oauth2-proxy-{{ frp_web_oauth2_version }}/oauth2-proxy"
+    frp_web_caddy_binary: "/usr/local/lib/rbridge/caddy-{{ frp_web_caddy_version }}/caddy"
+    frp_web_oauth2_binary: "/usr/local/lib/rbridge/oauth2-proxy-{{ frp_web_oauth2_version }}/oauth2-proxy"
 
 - name: Create the dedicated unprivileged Caddy account
   ansible.builtin.user:
-    name: frp-tunnel-web
+    name: rbridge-web
     system: true
     create_home: false
-    home: /var/lib/frp-tunnel-web
+    home: /var/lib/rbridge-web
     shell: /usr/sbin/nologin
     password_lock: true
 
@@ -22,30 +22,30 @@
     group: root
     mode: "0755"
   loop:
-    - /etc/frp-tunnel/web
-    - /var/cache/frp-tunnel
-    - "/usr/local/lib/frp-tunnel/caddy-{{ frp_web_caddy_version }}"
+    - /etc/rbridge/web
+    - /var/cache/rbridge
+    - "/usr/local/lib/rbridge/caddy-{{ frp_web_caddy_version }}"
 
 - name: Record exclusive web resource ownership
   ansible.builtin.copy:
-    content: "frp-tunnel-web\n"
-    dest: /etc/frp-tunnel/web/.managed
+    content: "rbridge-web\n"
+    dest: /etc/rbridge/web/.managed
     owner: root
     group: root
     mode: "0644"
 
 - name: Create private persistent certificate storage
   ansible.builtin.file:
-    path: /var/lib/frp-tunnel-web
+    path: /var/lib/rbridge-web
     state: directory
-    owner: frp-tunnel-web
-    group: frp-tunnel-web
+    owner: rbridge-web
+    group: rbridge-web
     mode: "0700"
 
 - name: Download the checksum-pinned Caddy release
   ansible.builtin.get_url:
     url: "https://github.com/caddyserver/caddy/releases/download/v{{ frp_web_caddy_version }}/caddy_{{ frp_web_caddy_version }}_linux_{{ frp_web_arch }}.tar.gz"
-    dest: "/var/cache/frp-tunnel/caddy_{{ frp_web_caddy_version }}_{{ frp_web_arch }}.tar.gz"
+    dest: "/var/cache/rbridge/caddy_{{ frp_web_caddy_version }}_{{ frp_web_arch }}.tar.gz"
     checksum: "{{ frp_web_caddy_checksums[frp_web_arch] }}"
     use_proxy: false
     use_netrc: false
@@ -56,8 +56,8 @@
 
 - name: Extract the verified Caddy binary without adopting another installation
   ansible.builtin.unarchive:
-    src: "/var/cache/frp-tunnel/caddy_{{ frp_web_caddy_version }}_{{ frp_web_arch }}.tar.gz"
-    dest: "/usr/local/lib/frp-tunnel/caddy-{{ frp_web_caddy_version }}"
+    src: "/var/cache/rbridge/caddy_{{ frp_web_caddy_version }}_{{ frp_web_arch }}.tar.gz"
+    dest: "/usr/local/lib/rbridge/caddy-{{ frp_web_caddy_version }}"
     remote_src: true
     owner: root
     group: root
@@ -82,15 +82,15 @@
 - name: Validate Caddy configuration before atomic replacement
   ansible.builtin.template:
     src: Caddyfile.j2
-    dest: /etc/frp-tunnel/web/Caddyfile
+    dest: /etc/rbridge/web/Caddyfile
     owner: root
-    group: frp-tunnel-web
+    group: rbridge-web
     mode: "0640"
     validate: "{{ frp_web_caddy_binary }} validate --config %s --adapter caddyfile"
   environment:
-    HOME: /var/lib/frp-tunnel-web
-    XDG_DATA_HOME: /var/lib/frp-tunnel-web/data
-    XDG_CONFIG_HOME: /var/lib/frp-tunnel-web/config
+    HOME: /var/lib/rbridge-web
+    XDG_DATA_HOME: /var/lib/rbridge-web/data
+    XDG_CONFIG_HOME: /var/lib/rbridge-web/config
   register: frp_web_caddy_config
   no_log: true
   diff: false
@@ -99,16 +99,16 @@
 # runs as root to read Ansible's private candidate, but the runtime owns storage.
 - name: Assign provisioned certificate storage to the runtime account
   ansible.builtin.file:
-    path: /var/lib/frp-tunnel-web
+    path: /var/lib/rbridge-web
     state: directory
-    owner: frp-tunnel-web
-    group: frp-tunnel-web
+    owner: rbridge-web
+    group: rbridge-web
     recurse: true
 
 - name: Install the dedicated HTTPS service unit
   ansible.builtin.template:
-    src: frp-tunnel-web.service.j2
-    dest: /etc/systemd/system/frp-tunnel-web.service
+    src: rbridge-web.service.j2
+    dest: /etc/systemd/system/rbridge-web.service
     owner: root
     group: root
     mode: "0644"
@@ -123,13 +123,13 @@
 
 - name: Stop changed authenticators before reassigning loopback listeners
   ansible.builtin.systemd_service:
-    name: "frp-tunnel-oidc-{{ item }}.service"
+    name: "rbridge-oidc-{{ item }}.service"
     state: stopped
   loop: "{{ frp_web_oidc_changed }}"
 
 - name: Apply validated HTTPS configuration and enable ingress
   ansible.builtin.systemd_service:
-    name: frp-tunnel-web.service
+    name: rbridge-web.service
     enabled: true
     daemon_reload: "{{ frp_web_caddy_unit.changed }}"
     state: "{{ 'restarted' if frp_web_caddy_unit.changed else ('reloaded' if frp_web_caddy_config.changed else 'started') }}"
@@ -138,7 +138,7 @@
 # ports. Until then those protected apps return 502, never another app's policy.
 - name: Enable and start the desired authenticators
   ansible.builtin.systemd_service:
-    name: "frp-tunnel-oidc-{{ app.name }}.service"
+    name: "rbridge-oidc-{{ app.name }}.service"
     enabled: true
     state: started
   loop: "{{ frp_web_oidc_apps }}"

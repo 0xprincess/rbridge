@@ -91,7 +91,7 @@ def check_tunnel(folder, public_port, user):
 
 def prepare_keys(folder):
     for name in ("host", "relay", "login"):
-        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "frp-tunnel test",
+        run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "rbridge test",
              "-f", str(folder / f"{name}.key")])
 
 
@@ -129,9 +129,9 @@ def process_test(args, folder, user, values):
     (folder / "token").write_text(os.urandom(32).hex() + "\n")
     for role, name in (("frp_server", "frps.toml"), ("frp_client", "frpc.toml"),
                        ("frp_client", "sshd_config")):
-        content = render(role, name + ".j2", values).replace("/etc/frp-tunnel/", str(folder) + "/")
+        content = render(role, name + ".j2", values).replace("/etc/rbridge/", str(folder) + "/")
         content = content.replace("/etc/ssh/ssh_host_ed25519_key", str(folder / "host.key"))
-        content = content.replace("/run/frp-tunnel-sshd/sshd.pid", str(folder / "sshd.pid"))
+        content = content.replace("/run/rbridge-sshd/sshd.pid", str(folder / "sshd.pid"))
         (folder / name).write_text(content)
     run([args.frps, "verify", "-c", str(folder / "frps.toml")])
     run([args.frpc, "verify", "-c", str(folder / "frpc.toml")])
@@ -209,10 +209,10 @@ def main():
                                  "--local", "--user", args.user], check=False)
         raise SystemExit(result.returncode)
     # OpenSSH StrictModes rejects authorized keys below world-writable /tmp.
-    with tempfile.TemporaryDirectory(prefix="frp-tunnel-test-", dir="/run") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rbridge-test-", dir="/run") as temporary:
         folder = Path(temporary)
         folder.chmod(0o755)  # sshd reads the public authorized key as the login user.
-        values = {"frp_service_user": "frp-tunnel", "frp_relay_user": "frp-relay"}
+        values = {"frp_service_user": "rbridge", "frp_relay_user": "frp-relay"}
         process_test(args, folder, args.user, values)
 
 

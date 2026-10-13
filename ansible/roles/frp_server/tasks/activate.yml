@@ -6,7 +6,7 @@
 # The earlier FRPS restart also releases v0.1's directly published SSH port.
 - name: Enable explicit public TCP listeners after applying FRP and web changes
   ansible.builtin.systemd_service:
-    name: "frp-tunnel-publish-{{ item.name }}.socket"
+    name: "rbridge-publish-{{ item.name }}.socket"
     enabled: true
     state: started
   loop: "{{ frp_tcp_services }}"

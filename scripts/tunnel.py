@@ -33,8 +33,8 @@ PORT_DEFAULTS = {
     "frp_client_admin_port": 17400, "frp_server_admin_port": 17401,
 }
 LOGS = {
-    "client": "sudo journalctl -u frp-tunnel-transport -u frp-tunnel-client -u frp-tunnel-sshd --since '-10 min' --no-pager",
-    "server": "sudo journalctl -u frp-tunnel-server -u frp-tunnel-web -u 'frp-tunnel-oidc-*' --since '-10 min' --no-pager",
+    "client": "sudo journalctl -u rbridge-transport -u rbridge-client -u rbridge-sshd --since '-10 min' --no-pager",
+    "server": "sudo journalctl -u rbridge-server -u rbridge-web -u 'rbridge-oidc-*' --since '-10 min' --no-pager",
 }
 
 
@@ -80,7 +80,7 @@ def validate_config(config):
 
 def admin_settings(config, role, path=None):
     """Only loopback admin requests may carry the private API credentials."""
-    source = Path(path) if path else Path("/etc/frp-tunnel/" + ("frpc.toml" if role == "client" else "frps.toml"))
+    source = Path(path) if path else Path("/etc/rbridge/" + ("frpc.toml" if role == "client" else "frps.toml"))
     try:
         with source.open("rb") as stream:
             settings = tomllib.load(stream).get("webServer", {})
@@ -183,7 +183,7 @@ def registered_names(response, role):
 
 def transport_state(timeout):
     try:
-        result = subprocess.run(["systemctl", "is-active", "frp-tunnel-transport.service"],
+        result = subprocess.run(["systemctl", "is-active", "rbridge-transport.service"],
                                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=timeout, check=False)
     except (OSError, subprocess.TimeoutExpired):
         return "unknown"
@@ -371,7 +371,7 @@ def parser():
   python3 scripts/tunnel.py bulk-check --ssh-config /private/client.conf --host tunnel --size-mib 16 --json
   sudo python3 scripts/tunnel.py doctor --config /private/services.yml --role server --json
 Use flat Ansible variables, not inventory.yml. Repeated --config files overlay in order.
-The installed /etc/frp-tunnel/frpc.toml or frps.toml supplies loopback admin credentials.
+The installed /etc/rbridge/frpc.toml or frps.toml supplies loopback admin credentials.
 If absent, supply secrets.yml too. Files and output should remain private.
 Doctor only reads status and makes bounded TCP connections / HTTP GET / requests.
 It never follows redirects, submits passwords, mutates services or completes OIDC login.
@@ -396,7 +396,7 @@ Logs (review privately; journals may contain endpoints):
         command.add_argument("--json", action="store_true", help="Emit safe machine-readable output; service numbers follow configuration order")
         if name == "doctor":
             command.add_argument("--role", required=True, choices=("client", "server"), help="Role installed on the machine running this command")
-            command.add_argument("--frp-config", metavar="FILE", help="Installed FRP TOML override (default /etc/frp-tunnel/frpc.toml or frps.toml)")
+            command.add_argument("--frp-config", metavar="FILE", help="Installed FRP TOML override (default /etc/rbridge/frpc.toml or frps.toml)")
             command.add_argument("--timeout", type=float, default=3, help="Per-check wall-clock deadline in seconds, including DNS (0.1–30; default 3)")
     bulk = commands.add_parser("bulk-check", help="Verify native SSH upload/download through an explicit SSH profile")
     bulk.add_argument("--ssh-config", required=True, metavar="FILE", help="Trusted private OpenSSH config with identity, user, port and backend host pin")

@@ -2,7 +2,7 @@
 - name: Restart FRP server
   listen: Restart FRP authentication
   ansible.builtin.systemd_service:
-    name: frp-tunnel-server
+    name: rbridge-server
     daemon_reload: true
     state: restarted
 

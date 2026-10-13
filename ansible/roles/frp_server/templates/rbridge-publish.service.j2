@@ -1,9 +1,9 @@
-# Managed by frp-tunnel; socket activation preserves native application bytes.
+# Managed by rbridge; socket activation preserves native application bytes.
 [Unit]
 Description=TCP forwarding for {{ item.name }}
-BindsTo=frp-tunnel-publish-{{ item.name }}.socket
-After=frp-tunnel-publish-{{ item.name }}.socket frp-tunnel-server.service
-Wants=frp-tunnel-server.service
+BindsTo=rbridge-publish-{{ item.name }}.socket
+After=rbridge-publish-{{ item.name }}.socket rbridge-server.service
+Wants=rbridge-server.service
 StartLimitIntervalSec=0
 
 [Service]

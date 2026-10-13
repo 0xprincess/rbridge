@@ -1,7 +1,7 @@
 ---
 - name: Create the isolated application configuration directory
   ansible.builtin.file:
-    path: "/etc/frp-tunnel/web/oidc-{{ app.name }}"
+    path: "/etc/rbridge/web/oidc-{{ app.name }}"
     state: directory
     owner: root
     group: root
@@ -10,7 +10,7 @@
 - name: Install the application's explicit email allowlist
   ansible.builtin.copy:
     content: "{{ (app.access.allowed_emails | default([]) | join('\n')) + '\n' }}"
-    dest: "/etc/frp-tunnel/web/oidc-{{ app.name }}/emails"
+    dest: "/etc/rbridge/web/oidc-{{ app.name }}/emails"
     owner: root
     group: root
     mode: "0644"
@@ -21,7 +21,7 @@
 - name: Validate authenticator configuration before replacing secrets
   ansible.builtin.template:
     src: oauth2-proxy.cfg.j2
-    dest: "/etc/frp-tunnel/web/oidc-{{ app.name }}/oauth2.cfg"
+    dest: "/etc/rbridge/web/oidc-{{ app.name }}/oauth2.cfg"
     owner: root
     group: root
     mode: "0600"
@@ -32,8 +32,8 @@
 
 - name: Install the isolated authenticator unit
   ansible.builtin.template:
-    src: frp-tunnel-oidc.service.j2
-    dest: "/etc/systemd/system/frp-tunnel-oidc-{{ app.name }}.service"
+    src: rbridge-oidc.service.j2
+    dest: "/etc/systemd/system/rbridge-oidc-{{ app.name }}.service"
     owner: root
     group: root
     mode: "0644"

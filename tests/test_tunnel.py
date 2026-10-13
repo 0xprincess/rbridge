@@ -407,7 +407,7 @@ class GenerationTests(unittest.TestCase):
             with patch.dict(os.environ, environment, clear=True), redirect_stdout(io.StringIO()):
                 with self.assertRaises(ValueError):
                     prepare.main()
-            self.assertFalse((Path(folder) / "frp-tunnel").exists())
+            self.assertFalse((Path(folder) / "rbridge").exists())
 
 
 if __name__ == "__main__":

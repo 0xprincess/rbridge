@@ -1,0 +1,3 @@
+#!/bin/sh
+# systemd services alone do not keep a WSL distribution alive.
+exec /usr/bin/flock -n /run/rbridge-keepalive.lock /bin/sh -c 'systemctl start {{ "rbridge-sshd.service " if frp_managed_ssh else "" }}rbridge-transport.service rbridge-client.service && exec /usr/bin/sleep infinity'

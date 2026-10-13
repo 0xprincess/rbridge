@@ -66,7 +66,7 @@ def _connection(config, service):
                and service["backend_host"] == "127.0.0.1"
                and service["backend_port"] == config.get("frp_backend_ssh_port", 2222)
                and isinstance(user, str) and bool(re.fullmatch(r"[a-z_][a-z0-9_-]{0,30}", user))
-               and user not in ("root", config.get("frp_service_user", "frp-tunnel"), config.get("frp_relay_user", "frp-relay"))
+               and user not in ("root", config.get("frp_service_user", "rbridge"), config.get("frp_relay_user", "frp-relay"))
                and isinstance(config.get("frp_login_public_key"), str)
                and bool(re.fullmatch(r"ssh-ed25519 [A-Za-z0-9+/=]+(?: [^\r\n]*)?", config["frp_login_public_key"])))
     command = shlex.join(["ssh", "-p", str(port), "-l", user, "--", host]) if managed else None

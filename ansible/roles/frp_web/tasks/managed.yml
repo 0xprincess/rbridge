@@ -3,34 +3,34 @@
   ansible.builtin.stat:
     path: "{{ item }}"
   loop:
-    - /etc/frp-tunnel/web
-    - /var/lib/frp-tunnel-web
-    - /etc/systemd/system/frp-tunnel-web.service
+    - /etc/rbridge/web
+    - /var/lib/rbridge-web
+    - /etc/systemd/system/rbridge-web.service
   register: frp_web_resources
 
 - name: Refuse to adopt unrelated web resources
   ansible.builtin.assert:
     that:
       - frp_web_marker.stat.exists or not item.stat.exists
-    fail_msg: Dedicated frp-tunnel web resources already exist without their ownership marker.
+    fail_msg: Dedicated rbridge web resources already exist without their ownership marker.
   loop: "{{ frp_web_resources.results }}"
 
 - name: Inspect existing dedicated web account
   ansible.builtin.getent:
     database: passwd
-    key: frp-tunnel-web
+    key: rbridge-web
     fail_key: false
 
 - name: Refuse to adopt an unrelated web account
   ansible.builtin.assert:
     that:
-      - frp_web_marker.stat.exists or ansible_facts.getent_passwd['frp-tunnel-web'] is none
-    fail_msg: The dedicated frp-tunnel-web account is already in use.
+      - frp_web_marker.stat.exists or ansible_facts.getent_passwd['rbridge-web'] is none
+    fail_msg: The dedicated rbridge-web account is already in use.
 
 - name: Discover previously generated OIDC units
   ansible.builtin.find:
     paths: /etc/systemd/system
-    patterns: frp-tunnel-oidc-*.service
+    patterns: rbridge-oidc-*.service
     file_type: file
   register: frp_web_existing_oidc_units
 
@@ -42,7 +42,7 @@
 
 - name: Determine the desired OIDC units
   ansible.builtin.set_fact:
-    frp_web_desired_oidc_units: "{{ frp_web_oidc_apps | map(attribute='name') | map('regex_replace', '^(.*)$', 'frp-tunnel-oidc-\\1.service') | list }}"
+    frp_web_desired_oidc_units: "{{ frp_web_oidc_apps | map(attribute='name') | map('regex_replace', '^(.*)$', 'rbridge-oidc-\\1.service') | list }}"
   no_log: true
 
 - name: Stop obsolete OIDC listeners before deleting configuration
@@ -67,7 +67,7 @@
 
 - name: Discover owned OIDC configuration directories
   ansible.builtin.find:
-    paths: /etc/frp-tunnel/web
+    paths: /etc/rbridge/web
     patterns: oidc-*
     file_type: directory
   register: frp_web_existing_oidc_configs
@@ -82,13 +82,13 @@
 
 - name: Inspect dedicated Caddy unit for web removal
   ansible.builtin.stat:
-    path: /etc/systemd/system/frp-tunnel-web.service
+    path: /etc/systemd/system/rbridge-web.service
   register: frp_web_owned_unit
   when: frp_web_apps | length == 0
 
 - name: Stop HTTPS ingress when the last web application is removed
   ansible.builtin.systemd_service:
-    name: frp-tunnel-web.service
+    name: rbridge-web.service
     enabled: false
     state: stopped
   when:
@@ -100,8 +100,8 @@
     path: "{{ item }}"
     state: absent
   loop:
-    - /etc/systemd/system/frp-tunnel-web.service
-    - /etc/frp-tunnel/web/Caddyfile
+    - /etc/systemd/system/rbridge-web.service
+    - /etc/rbridge/web/Caddyfile
   when: frp_web_apps | length == 0
   register: frp_web_removed_caddy
 

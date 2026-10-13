@@ -5,12 +5,12 @@ StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-RuntimeDirectory=frp-tunnel-sshd
+RuntimeDirectory=rbridge-sshd
 RuntimeDirectoryMode=0755
 # The shared OpenSSH directory must not be removed when this instance stops.
 ExecStartPre=/usr/bin/install -d -m 0755 /run/sshd
-ExecStartPre=/usr/sbin/sshd -t -f /etc/frp-tunnel/sshd_config
-ExecStart=/usr/sbin/sshd -D -e -f /etc/frp-tunnel/sshd_config
+ExecStartPre=/usr/sbin/sshd -t -f /etc/rbridge/sshd_config
+ExecStart=/usr/sbin/sshd -D -e -f /etc/rbridge/sshd_config
 Restart=always
 RestartSec=5
 

@@ -1,12 +1,12 @@
 [Unit]
-Description=frp-tunnel OIDC authorization for {{ app.name }}
+Description=rbridge OIDC authorization for {{ app.name }}
 Wants=network-online.target
 After=network-online.target
 
 [Service]
 Type=simple
 DynamicUser=true
-LoadCredential=oauth2.cfg:/etc/frp-tunnel/web/oidc-{{ app.name }}/oauth2.cfg
+LoadCredential=oauth2.cfg:/etc/rbridge/web/oidc-{{ app.name }}/oauth2.cfg
 ExecStartPre={{ frp_web_oauth2_binary }} --config=%d/oauth2.cfg --config-test
 ExecStart={{ frp_web_oauth2_binary }} --config=%d/oauth2.cfg
 Restart=on-failure

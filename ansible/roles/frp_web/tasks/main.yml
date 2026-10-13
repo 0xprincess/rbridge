@@ -11,7 +11,7 @@
 
 - name: Inspect dedicated web ownership marker
   ansible.builtin.stat:
-    path: /etc/frp-tunnel/web/.managed
+    path: /etc/rbridge/web/.managed
   register: frp_web_marker
 
 - name: Validate web release and certificate settings

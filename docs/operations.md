@@ -77,7 +77,7 @@ Choose the role present on that host. If services use OIDC, also pass
 flat YAML variable mappings, not Ansible inventories. Generated `services.yml`
 includes `frp_server_address`; it is needed for public TCP checks.
 
-Doctor reads admin credentials from `/etc/frp-tunnel/frpc.toml` or `frps.toml`.
+Doctor reads admin credentials from `/etc/rbridge/frpc.toml` or `frps.toml`.
 `--frp-config FILE` selects another installed configuration. If the default file
 is absent, flat configuration may supply the admin variables instead. API
 requests carrying credentials are restricted to literal loopback destinations.
@@ -200,7 +200,7 @@ transfer does not establish that the WSL path works. Neither changing SSH QoS
 nor lowering MSS should be treated as a fix without repeating the byte checks.
 
 This profile changes **public native SSH access only**. The managed
-`frp-tunnel-transport` and administrative Ansible connections remain direct;
+`rbridge-transport` and administrative Ansible connections remain direct;
 do not assume this profile reroutes either one.
 
 ## Services and logs
@@ -208,27 +208,27 @@ do not assume this profile reroutes either one.
 On the relay:
 
 ```bash
-sudo systemctl status frp-tunnel-server frp-tunnel-web --no-pager
-sudo systemctl list-units 'frp-tunnel-publish-*' 'frp-tunnel-oidc-*'
-sudo journalctl -u frp-tunnel-server -u frp-tunnel-web \
-  -u 'frp-tunnel-oidc-*' --since '-10 min' --no-pager
+sudo systemctl status rbridge-server rbridge-web --no-pager
+sudo systemctl list-units 'rbridge-publish-*' 'rbridge-oidc-*'
+sudo journalctl -u rbridge-server -u rbridge-web \
+  -u 'rbridge-oidc-*' --since '-10 min' --no-pager
 sudo ss -ltnp
 ```
 
-`frp-tunnel-web` exists only with web publications. All FRP proxy/control/admin
+`rbridge-web` exists only with web publications. All FRP proxy/control/admin
 and OIDC listeners must be loopback. Public TCP sockets can remain listening
 while the origin is disconnected; their presence no longer proves registration.
 
 On the client:
 
 ```bash
-sudo systemctl status frp-tunnel-transport frp-tunnel-client --no-pager
-sudo journalctl -u frp-tunnel-transport -u frp-tunnel-client \
-  -u frp-tunnel-sshd --since '-10 min' --no-pager
+sudo systemctl status rbridge-transport rbridge-client --no-pager
+sudo journalctl -u rbridge-transport -u rbridge-client \
+  -u rbridge-sshd --since '-10 min' --no-pager
 sudo ss -tnp
 ```
 
-The managed `frp-tunnel-sshd` unit exists only with `frp_managed_ssh: true`.
+The managed `rbridge-sshd` unit exists only with `frp_managed_ssh: true`.
 Native host SSH is separate. The persistent outbound transport goes directly to
 the relay's SSH port; FRP connects to client loopback. Systemd clears proxy
 environment variables, and OpenSSH ignores user proxy configuration. Logs can
@@ -239,8 +239,8 @@ contain endpoints, identities, OAuth URLs and filesystem paths; review privately
 From Windows PowerShell:
 
 ```powershell
-Get-ScheduledTask -TaskName 'FRP tunnel - Ubuntu-24.04'
-Start-ScheduledTask -TaskName 'FRP tunnel - Ubuntu-24.04'
+Get-ScheduledTask -TaskName 'rbridge - Ubuntu-24.04'
+Start-ScheduledTask -TaskName 'rbridge - Ubuntu-24.04'
 ```
 
 Adjust the suffix for your distribution. Startup occurs at user logon, not boot
@@ -251,7 +251,7 @@ restart the task or open WSL; systemd alone does not keep a distribution alive.
 ## Reconnection and configuration changes
 
 ```bash
-sudo systemctl restart frp-tunnel-transport
+sudo systemctl restart rbridge-transport
 ```
 
 SSH keepalives detect lost connections, systemd restarts transport, and FRP
@@ -303,7 +303,7 @@ To unregister Windows startup:
 ./scripts/register-wsl-startup.ps1 -Distribution Ubuntu-24.04 -Remove
 ```
 
-For full uninstall, disable all owned `frp-tunnel-*` units on the relevant hosts.
+For full uninstall, disable all owned `rbridge-*` units on the relevant hosts.
 Review ownership before removing generated unit/configuration files, the
 keepalive helper, versioned binaries, caches and dedicated accounts. Certificate
 storage contains private keys; retain or delete it deliberately. Remove only the

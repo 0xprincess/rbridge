@@ -27,8 +27,7 @@ access paths prevent a universal speed ranking.
 
 The [`v0.1` release](https://github.com/0xprincess/rbridge/releases/tag/v0.1)
 preserves the complete SSH-only baseline. Generalized publishing and the `rbridge`
-CLI are available on `main`; [deployment](docs/deployment.md) describes migration
-and rollback.
+CLI are available on `main`; [deployment](docs/deployment.md) describes rollback.
 
 ```mermaid
 flowchart LR
@@ -108,7 +107,7 @@ workspace uses the current Linux/WSL host as the origin and needs no login accou
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
-export PRIVATE="$HOME/.config/frp-tunnel-private"
+export PRIVATE="$HOME/.config/rbridge-private"
 ```
 
 Obtain the relay's Ed25519 host key through a trusted connection or provider
