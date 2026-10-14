@@ -1,0 +1,55 @@
+---
+# Persistent policy customizations for SELinux hosts (Fedora/RHEL family,
+# openSUSE). Each script prints "changed" only when it modifies the policy.
+- name: Inspect SELinux policy management tools
+  ansible.builtin.command:
+    argv: [sh, -c, "command -v semanage && command -v restorecon"]
+  register: frp_selinux_tools
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Require SELinux policy management tools
+  ansible.builtin.assert:
+    that:
+      - frp_selinux_tools.rc == 0
+    fail_msg: SELinux is enabled; install semanage and restorecon (policycoreutils) first.
+
+# Release binaries would otherwise inherit lib_t, which systemd executes in
+# init_t; bin_t starts them as ordinary unconfined_service_t services. (The
+# policy already labels /var/lib/*/.ssh ssh_home_t; restorecon applies it.)
+- name: Label owned release binaries as executables persistently
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - |
+        set -eu
+        spec='/usr/local/lib/rbridge(/.*)?'
+        if semanage fcontext -l -C | awk -v spec="$spec" '$1 == spec && index($NF, ":bin_t:") { found = 1 } END { exit !found }'; then
+            exit 0
+        fi
+        semanage fcontext -a -t bin_t "$spec" 2>/dev/null || semanage fcontext -m -t bin_t "$spec"
+        echo changed
+  register: frp_selinux_fcontext
+  changed_when: "'changed' in frp_selinux_fcontext.stdout"
+
+- name: Allow the dedicated SSH backend to bind its loopback port
+  ansible.builtin.command:
+    argv:
+      - sh
+      - -c
+      - |
+        set -eu
+        if semanage port -l | awk -v port="$1" '$1 == "ssh_port_t" && $2 == "tcp" { for (i = 3; i <= NF; i++) { value = $i; sub(",", "", value); if (value == port) found = 1 } } END { exit !found }'; then
+            exit 0
+        fi
+        semanage port -a -t ssh_port_t -p tcp "$1" 2>/dev/null || semanage port -m -t ssh_port_t -p tcp "$1"
+        echo changed
+      - sh
+      - "{{ frp_backend_ssh_port | int }}"
+  register: frp_selinux_port
+  changed_when: "'changed' in frp_selinux_port.stdout"
+  when:
+    - "'frp_clients' in group_names"
+    - frp_managed_ssh

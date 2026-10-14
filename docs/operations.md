@@ -50,8 +50,9 @@ Inspect private `apply.log`, diagnose both hosts, correct the inputs and run
 `plan`, then `apply`. A successful rollout clears the marker; do not delete it
 to claim recovery. Saved desired inputs remain available for retry.
 
-Exiting the CLI does not stop systemd publications. Backends must keep running;
-WSL must remain running and Windows awake. Removing a publication does not stop
+Exiting the CLI does not stop systemd publications. Backends must keep running
+and the origin machine awake; under WSL the distribution must also remain
+running and Windows awake. Removing a publication does not stop
 the application. Removing the last HTTP publication closes managed web ingress;
 removing all publications leaves idle transport infrastructure, accounts,
 credentials and certificate storage. [Full removal](#rotation-and-removal)
@@ -155,8 +156,11 @@ Host tunnel-direct tunnel-proxied
 The login host pin must be the **origin SSH server's** independently verified
 key, indexed under the relay's published address and port—not the relay's
 administrative host key. The profile and keys stay outside the checkout.
-The SOCKS example requires OpenBSD netcat (`netcat-openbsd` on Ubuntu) and a
-reachable local SOCKS5 listener. `10808` is an example, not an auto-detected
+The SOCKS example requires OpenBSD netcat (`netcat-openbsd` on Debian, Ubuntu
+and openSUSE; `openbsd-netcat` on Arch) and a reachable local SOCKS5 listener.
+Fedora/RHEL's `nc` is Ncat: use `ProxyCommand /usr/bin/ncat --proxy
+127.0.0.1:10808 --proxy-type socks5 %h %p` instead.
+`10808` is an example, not an auto-detected
 setting. Mirrored WSL can reach a Windows loopback listener; verify reachability
 instead of assuming NAT-mode WSL uses the same address. Do not expose an
 unauthenticated SOCKS listener to an untrusted network.
@@ -297,7 +301,7 @@ in private inputs. Rotate relay keys, FRP tokens and admin passwords on both
 hosts in a maintenance window. Preserve existing administrative access. Rotate
 OIDC client/cookie secrets deliberately; cookie-key rotation invalidates sessions.
 
-To unregister Windows startup:
+Under WSL, to unregister Windows startup:
 
 ```powershell
 ./scripts/register-wsl-startup.ps1 -Distribution Ubuntu-24.04 -Remove
@@ -308,6 +312,10 @@ Review ownership before removing generated unit/configuration files, the
 keepalive helper, versioned binaries, caches and dedicated accounts. Certificate
 storage contains private keys; retain or delete it deliberately. Remove only the
 project's account-scoped SSH policy, validate native SSH configuration and reload
-SSH. Run `systemctl daemon-reload` afterward. Full removal remains manual because
+SSH (`ssh.service` on Debian/Ubuntu, `sshd.service` elsewhere). On SELinux hosts,
+optionally delete the local customizations the roles added:
+`semanage fcontext -d '/usr/local/lib/rbridge(/.*)?'` and, for the managed SSH
+port, `semanage port -d -t ssh_port_t -p tcp PORT`.
+Run `systemctl daemon-reload` afterward. Full removal remains manual because
 reused accounts/ports and retained credentials require review. See
 [rollback](deployment.md#upgrades-and-rollback) before redeploying `v0.1`.

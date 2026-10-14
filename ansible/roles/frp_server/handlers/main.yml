@@ -8,5 +8,5 @@
 
 - name: Reload relay SSH policy
   ansible.builtin.systemd_service:
-    name: ssh
+    name: "{{ frp_platform.ssh_service }}"
     state: reloaded

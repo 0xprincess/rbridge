@@ -7,7 +7,10 @@ Wants=rbridge-server.service
 StartLimitIntervalSec=0
 
 [Service]
-ExecStart=/usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:{{ item.relay_port }}
+# Under SELinux, starting via env (bin_t) runs the proxy as unconfined_service_t
+# like the other rbridge services: NoNewPrivileges= forbids the transition into
+# systemd_socket_proxyd_t, whose policy also cannot reach unlabeled FRP ports.
+ExecStart=/usr/bin/env /usr/lib/systemd/systemd-socket-proxyd 127.0.0.1:{{ item.relay_port }}
 User={{ frp_service_user }}
 Group={{ frp_service_user }}
 Restart=on-failure

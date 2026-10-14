@@ -53,18 +53,42 @@
   loop: "{{ frp_candidate_accounts.results }}"
   no_log: true
 
+- name: Select the distribution family's packages and services
+  ansible.builtin.set_fact:
+    frp_platform: "{{ frp_platforms[ansible_facts['os_family']] }}"
+    frp_selinux: "{{ (ansible_facts['selinux'] | default({})).get('status') == 'enabled' }}"
+
+- name: Select the packages this host requires
+  ansible.builtin.set_fact:
+    frp_required_packages: "{{ frp_platform.packages + (frp_platform.selinux_packages | default([]) if frp_selinux else []) }}"
+
 - name: Install operating system dependencies
   ansible.builtin.apt:
-    name:
-      - ca-certificates
-      - openssh-client
-      - openssh-server
-      - python3-yaml
-      - tar
-      - util-linux
+    name: "{{ frp_required_packages }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
+  when: ansible_facts['os_family'] == 'Debian'
+
+- name: Find missing operating system dependencies
+  ansible.builtin.command:
+    argv: "{{ frp_platform.query + frp_required_packages }}"
+  register: frp_missing_packages
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  when: ansible_facts['os_family'] != 'Debian'
+
+- name: Install missing operating system dependencies
+  ansible.builtin.command:
+    argv: "{{ frp_platform.install + frp_required_packages }}"
+  when:
+    - ansible_facts['os_family'] != 'Debian'
+    - frp_missing_packages.rc != 0
+
+- name: Configure SELinux file labels and the managed SSH port
+  ansible.builtin.include_tasks: selinux.yml
+  when: frp_selinux
 
 - name: Create the unprivileged FRP service account
   ansible.builtin.user:
@@ -123,6 +147,13 @@
     owner: root
     group: root
     creates: "{{ frp_binary_dir }}/frpc"
+
+- name: Apply SELinux labels to owned release binaries
+  ansible.builtin.command:
+    argv: [restorecon, -R, -v, /usr/local/lib/rbridge]
+  register: frp_selinux_release_labels
+  changed_when: frp_selinux_release_labels.stdout | length > 0
+  when: frp_selinux
 
 # Persist only the revision-bound credential, never the private base secret.
 # Quiesce owned relay processes before changing it: a failed web rollout must

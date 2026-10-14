@@ -7,7 +7,7 @@ fail() { printf '%s\n' "rbridge installer: $*" >&2; exit 1; }
 usage() {
     printf '%s\n' 'Usage: sh install.sh [--prefix DIR] [--python EXECUTABLE]' \
         'Default prefix: $HOME/.local; installs bin/rbridge and share/rbridge.' \
-        'Requires Linux/WSL, Python 3.11+ with venv/pip, OpenSSH, tar and Internet access.' \
+        'Requires Linux (including WSL), Python 3.11+ with venv/pip, OpenSSH, tar and Internet access.' \
         'Run again from an updated checkout to install a new isolated release.'
 }
 prefix=${HOME:?HOME is required}/.local
@@ -23,7 +23,7 @@ while [ "$#" -gt 0 ]; do
         *) fail "unknown argument: $1" ;;
     esac
 done
-[ "$(uname -s)" = Linux ] || fail 'only Linux and WSL are supported'
+[ "$(uname -s)" = Linux ] || fail 'only Linux (including WSL) is supported'
 for command in "$python" ssh ssh-keygen tar readlink; do
     command -v "$command" >/dev/null 2>&1 || fail "required command not found: $command"
 done
@@ -32,7 +32,19 @@ source_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 [ -f "$source_dir/scripts/bridge.py" ] && [ -f "$source_dir/ansible/deploy.yml" ] || fail 'run install.sh from a complete project checkout'
 mkdir -p -- "$prefix"
 prefix=$(CDPATH= cd -- "$prefix" && pwd -P)
-case "$prefix" in /mnt|/mnt/*) fail 'install on the Linux filesystem, not a WSL /mnt mount' ;; esac
+# Virtualenvs and private permissions need a filesystem that enforces chmod;
+# Windows drives mounted in WSL (/mnt/c), FAT, NTFS and SMB mounts do not.
+"$python" - "$prefix" <<'PROBE' || fail 'install on a Linux filesystem that enforces permissions, not a Windows/FAT/NTFS/SMB mount'
+import os, stat, sys, tempfile
+descriptor, probe = tempfile.mkstemp(prefix=".rbridge-probe-", dir=sys.argv[1])
+try:
+    os.close(descriptor)
+    os.chmod(probe, 0o700)
+    info = os.stat(probe)
+finally:
+    os.unlink(probe)
+sys.exit(0 if stat.S_IMODE(info.st_mode) == 0o700 and info.st_uid == os.geteuid() else 1)
+PROBE
 bin=$prefix/bin
 data=$prefix/share/rbridge
 [ ! -L "$data" ] || fail 'refusing a symlinked installation directory'
@@ -66,7 +78,7 @@ tar -C "$source_dir" --exclude=__pycache__ --exclude='*.pyc' -cf "$release/roles
 tar -C "$release" -xf "$release/roles.tar"
 rm -- "$release/roles.tar"
 cp -- "$source_dir/requirements-dev.txt" "$source_dir/LICENSE" "$release/"
-"$python" -m venv "$release/venv" || fail 'cannot create a virtualenv; install the OS python3-venv package'
+"$python" -m venv "$release/venv" || fail 'cannot create a virtualenv; install the distribution venv/pip support (python3-venv on Debian/Ubuntu)'
 "$release/venv/bin/python" -m pip install --disable-pip-version-check -r "$release/requirements-dev.txt"
 cat > "$release/rbridge" <<'LAUNCHER'
 #!/bin/sh
@@ -80,7 +92,8 @@ LAUNCHER
 chmod 755 "$release/rbridge"
 "$release/rbridge" --help >/dev/null
 ln -s -- "$release" "$link"
-mv -Tf -- "$link" "$data/current"
+# rename(2) atomically replaces the selection symlink without GNU mv -T.
+"$python" -c 'import os, sys; os.replace(sys.argv[1], sys.argv[2])' "$link" "$data/current"
 activated=true
 if [ ! -L "$bin/rbridge" ]; then
     ln -s -- "$data/current/rbridge" "$bin/rbridge"

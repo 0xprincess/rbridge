@@ -7,6 +7,35 @@ frp_checksums:
 frp_architectures:
   x86_64: amd64
   aarch64: arm64
+# Supported systemd distribution families (ansible_facts.os_family). Commands
+# query/install only distribution packages; Debian uses the apt module.
+# selinux_packages are added only on hosts with SELinux enabled.
+frp_platforms:
+  Debian:
+    packages: [ca-certificates, openssh-client, openssh-server, python3-yaml, tar, util-linux]
+    ssh_service: ssh.service
+    selinux_packages: [policycoreutils-python-utils]
+  RedHat:
+    packages: [ca-certificates, openssh-clients, openssh-server, python3-pyyaml, tar, util-linux]
+    query: [rpm, -q, --whatprovides]
+    install: [dnf, -y, install]
+    ssh_service: sshd.service
+    selinux_packages: [policycoreutils-python-utils]
+  Suse:
+    packages: [ca-certificates, openssh-clients, openssh-server, python3-PyYAML, tar, util-linux]
+    query: [rpm, -q, --whatprovides]
+    install: [zypper, --non-interactive, install, --no-recommends]
+    ssh_service: sshd.service
+    selinux_packages: [policycoreutils-python-utils]
+  Archlinux:
+    # Arch does not support partial upgrades: the administrator keeps the host
+    # synchronized (pacman -Syu); the role never refreshes package databases.
+    packages: [ca-certificates, openssh, python-yaml, tar, util-linux]
+    query: [pacman, -T]
+    install: [pacman, -S, --needed, --noconfirm]
+    ssh_service: sshd.service
+# LoadCredential= and %d (systemd 247) are the newest unit features in use.
+frp_minimum_systemd: 247
 frp_service_user: rbridge
 frp_relay_user: frp-relay
 frp_server_port: 7000

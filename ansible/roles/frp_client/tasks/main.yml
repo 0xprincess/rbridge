@@ -41,6 +41,13 @@
     mode: "0755"
   when: frp_managed_ssh
 
+# Several distributions generate host keys only when the system sshd first starts.
+- name: Generate missing OpenSSH host keys for the dedicated instance
+  ansible.builtin.command:
+    argv: [ssh-keygen, -A]
+    creates: /etc/ssh/ssh_host_ed25519_key
+  when: frp_managed_ssh
+
 - name: Install the isolated key-only SSH configuration
   ansible.builtin.template:
     src: sshd_config.j2

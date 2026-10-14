@@ -17,4 +17,5 @@ StrictModes yes
 UsePAM yes
 X11Forwarding no
 PrintMotd no
-Subsystem sftp /usr/lib/openssh/sftp-server
+# Built into sshd: the external sftp-server path differs between distributions.
+Subsystem sftp internal-sftp

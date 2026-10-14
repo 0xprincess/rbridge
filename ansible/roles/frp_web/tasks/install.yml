@@ -67,6 +67,13 @@
   ansible.builtin.include_tasks: oauth2-install.yml
   when: frp_web_oidc_apps | length > 0
 
+- name: Apply SELinux labels to owned web release binaries
+  ansible.builtin.command:
+    argv: [restorecon, -R, -v, /usr/local/lib/rbridge]
+  register: frp_web_selinux_labels
+  changed_when: frp_web_selinux_labels.stdout | length > 0
+  when: frp_selinux
+
 - name: Initialize the authenticator restart set
   ansible.builtin.set_fact:
     frp_web_oidc_changed: []

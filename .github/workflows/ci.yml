@@ -54,6 +54,34 @@ jobs:
             "$RUNNER_TEMP/frp-tools/bin/python" scripts/integration-test.py \
             --user "$(id -un)" --apply-to-disposable-host
 
+  distribution-roles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - ubuntu:22.04
+          - ubuntu:24.04
+          - debian:12
+          - debian:stable
+          - fedora:latest
+          - almalinux:9
+          - almalinux:10
+          - archlinux:latest
+          - opensuse/tumbleweed:latest
+          - opensuse/leap:16.0
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Deploy the real roles into a disposable systemd container
+        run: python scripts/distro-test.py --image '${{ matrix.image }}'
+
   windows-startup-syntax:
     runs-on: windows-latest
     steps:

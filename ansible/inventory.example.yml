@@ -27,6 +27,6 @@ all:
           ansible_user: root
     frp_clients:
       hosts:
-        wsl:
+        origin:
           ansible_connection: local
           ansible_host: localhost

@@ -110,7 +110,7 @@ def build_plan(desired, previous=None, *, uncertain=False, reveal=False):
         warnings.append("Inventory, controller connection, or other configuration changed: conservatively expect possible restarts and traffic interruption even with an unchanged service manifest.")
     warnings.extend([
         "Rollout is fail-closed: old registrations or ingress may stop before replacement services are ready; failure can leave publication unavailable. No zero-downtime guarantee.",
-        "Services persist through enabled systemd units on the relay and Linux/WSL client, but the backend must keep running. WSL must be running and the machine awake; Windows wake/logon startup is not configured automatically.",
+        "Services persist through enabled systemd units on the relay and Linux client, but the backend must keep running and the client machine awake. Under WSL the distribution must also stay running; Windows wake/logon startup is not configured automatically.",
         "No automatic cloud provisioning, DNS records, or cloud/host firewall management: supply reachable hosts and configure these yourself.",
     ])
     if not has_web:
@@ -122,7 +122,7 @@ def build_plan(desired, previous=None, *, uncertain=False, reveal=False):
     actions = [
         "Review rbridge plan before rbridge apply; use --show-endpoints only for deliberate local endpoint disclosure.",
         "After apply, run rbridge status and test access from an external network, including denied users for protected HTTP services.",
-        "Keep the backend and relay/client units running; arrange WSL wake/logon startup if required.",
+        "Keep the backend and relay/client units running; under WSL, arrange Windows wake/logon startup if required.",
     ]
     if uncertain or not known:
         actions.insert(0, "Inspect actual relay/client services and reconcile any incomplete deployment before applying; do not treat the saved baseline as live state.")

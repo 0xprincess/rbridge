@@ -97,8 +97,8 @@ def prepare_keys(folder):
 
 def process_test(args, folder, user, values):
     # Only child processes and files in this temporary directory are managed.
-    if not Path("/run/sshd").is_dir():
-        raise RuntimeError("OpenSSH runtime directory /run/sshd must already exist.")
+    # Debian-built sshd needs /run/sshd; `sshd -t` below reports a missing
+    # privilege separation directory on any distribution.
     prepare_keys(folder)
     (server_port, public_port, forward_port, backend_port, relay_port,
      second_relay_port, second_public_port, client_admin_port, server_admin_port) = ports()

@@ -2,9 +2,10 @@
 - name: Validate the supported platform and private configuration
   ansible.builtin.assert:
     that:
-      - ansible_facts['distribution'] == 'Ubuntu'
-      - ansible_facts['distribution_major_version'] | int >= 24
+      - ansible_facts['system'] == 'Linux'
+      - ansible_facts['os_family'] in frp_platforms
       - ansible_facts['service_mgr'] == 'systemd'
+      - (ansible_facts['systemd'] | default({})).get('version', 0) | int >= frp_minimum_systemd
       - ansible_facts['architecture'] in frp_architectures
       - frp_version is match('^[0-9]+\.[0-9]+\.[0-9]+$')
       - frp_version in frp_checksums
@@ -20,7 +21,10 @@
       - frp_admin_password is defined
       - frp_admin_password is match('^[a-f0-9]{64}$')
       - frp_managed_ssh is boolean
-    fail_msg: Unsupported platform or invalid private account/token/admin configuration.
+    fail_msg: >-
+      Unsupported platform or invalid private account/token/admin configuration.
+      Hosts need Linux with systemd {{ frp_minimum_systemd }}+ from the Debian,
+      RedHat, Suse or Archlinux family on x86_64/aarch64.
   no_log: true
 
 - name: Validate listener port types and ranges

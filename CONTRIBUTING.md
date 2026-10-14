@@ -32,10 +32,13 @@ workstation merely to smoke the CLI.
 
 ## Full field regression
 
-**Destructive: use disposable Ubuntu 24.04+ / systemd hosts only.** The suite
+**Destructive: use disposable systemd hosts from a supported distribution family
+only** (see [supported setup](docs/deployment.md#supported-setup)). The suite
 installs packages/Docker, creates test services and identities, changes trust
 stores and hosts entries, deploys the real roles, and exercises failure/removal.
-Never run it on production, a normal workstation or a shared server.
+Never run it on production, a normal workstation or a shared server. RHEL-family
+origins have no distribution Docker package (Fedora's is `moby-engine`): install
+Docker there first, and enable EPEL for the origin fixture's `python3-aiohttp`.
 
 Install controller dependencies and a real browser:
 
@@ -45,7 +48,8 @@ python -m playwright install --with-deps chromium
 ```
 
 The controller also needs curl, OpenSSL and OpenSSH; internal-CA testing needs
-`certutil` from `libnss3-tools`. Prepare a private Ansible inventory with
+NSS `certutil` (`libnss3-tools` on Debian/Ubuntu, `nss-tools` on Fedora/RHEL,
+`mozilla-nss-tools` on openSUSE, `nss` on Arch). Prepare a private Ansible inventory with
 `frp_servers` and `frp_clients`, and an SSH config containing pinned `relay` and
 `origin` aliases with passwordless sudo. Create a non-root login account on the
 origin. Permit relay inbound administration SSH, TCP 80/443/2222/2233.
@@ -99,9 +103,24 @@ sudo .venv/bin/python scripts/integration-test.py \
   --user "$(id -un)"
 ```
 
-It requires an existing non-root user, OpenSSH and `/run/sshd`. Prefer the full
+It requires an existing non-root user and OpenSSH (Debian-family sshd also needs
+`/run/sshd`). Prefer the full
 field suite for role, web, authentication or lifecycle changes. Changes to pinned
 binaries/checksums require checking upstream sources and deployment evidence,
 not merely syntactic acceptance. Record only observed results in PRs; a network
 failure from one client path is not evidence of either universal failure or
 universal success.
+
+To check the roles on another distribution without a VPS, deploy them into a
+disposable privileged systemd container (Docker required; nothing on the host
+changes besides the container and a temporary directory):
+
+```bash
+python scripts/distro-test.py --image fedora:latest
+```
+
+It deploys relay and origin into one container twice, requires the second run to
+change nothing, then checks native SSH/SFTP through the public TCP publication
+and HTTPS through Caddy's internal CA. CI runs it for every supported family.
+Containers do not enforce SELinux or AppArmor; verify policy-sensitive changes
+on an enforcing VM (for example an AlmaLinux or Fedora cloud image).

@@ -4,6 +4,19 @@
     frp_tcp_services: "{{ frp_services_normalized | selectattr('protocol', 'equalto', 'tcp') | list }}"
   no_log: true
 
+- name: Inspect the systemd TCP socket proxy
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-socket-proxyd
+  register: frp_socket_proxyd
+  when: frp_tcp_services | length > 0
+
+- name: Require the systemd TCP socket proxy for public TCP services
+  ansible.builtin.assert:
+    that:
+      - frp_socket_proxyd.stat.executable | default(false)
+    fail_msg: Public TCP services need /usr/lib/systemd/systemd-socket-proxyd from the distribution's systemd packages.
+  when: frp_tcp_services | length > 0
+
 - name: Discover project-generated public listener units
   ansible.builtin.find:
     paths: /etc/systemd/system

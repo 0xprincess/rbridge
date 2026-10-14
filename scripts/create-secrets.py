@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Create private deployment inputs outside a Git checkout (Linux/WSL only)."""
+"""Create private deployment inputs outside a Git checkout (Linux only)."""
 
 import argparse
 import importlib.util
@@ -8,7 +8,9 @@ from pathlib import Path
 import re
 import secrets
 import shutil
+import stat
 import subprocess
+import tempfile
 
 import yaml
 
@@ -17,17 +19,34 @@ tunnel = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tunnel)
 
 
+def require_permission_enforcement(path):
+    """Refuse filesystems that ignore chmod/ownership, such as Windows drives in WSL."""
+    existing = next(ancestor for ancestor in (path, *path.parents) if ancestor.is_dir())
+    try:
+        descriptor, probe = tempfile.mkstemp(prefix=".rbridge-probe-", dir=existing)
+    except OSError:
+        return  # Creating the private directory reports its own error.
+    try:
+        os.close(descriptor)
+        os.chmod(probe, 0o600)
+        info = os.stat(probe)
+    finally:
+        os.unlink(probe)
+    if stat.S_IMODE(info.st_mode) != 0o600 or info.st_uid != os.geteuid():
+        raise ValueError("Use a Linux filesystem that enforces file permissions "
+                         "(not a Windows drive such as WSL /mnt/c or a FAT/NTFS/SMB mount).")
+
+
 def validate_destination(path):
     resolved = Path(path).expanduser().resolve()
     if os.name != "posix":
-        raise ValueError("Generate secrets inside Linux or WSL, on a Linux filesystem.")
-    if str(resolved).startswith("/mnt/"):
-        raise ValueError("Use the WSL Linux filesystem, not a shared /mnt directory.")
+        raise ValueError("Generate secrets on Linux (including WSL), on a Linux filesystem.")
     if resolved.exists():
         raise ValueError("Output directory already exists; refusing to overwrite keys.")
     for ancestor in (resolved, *resolved.parents):
         if (ancestor / ".git").exists():
             raise ValueError("Private deployment inputs must be outside every Git checkout.")
+    require_permission_enforcement(resolved)
     return resolved
 
 
@@ -103,8 +122,8 @@ def generate(args):
             "children": {
                 "frp_servers": {"hosts": {"relay": {"ansible_host": host,
                                                     "ansible_user": args.admin_user}}},
-                "frp_clients": {"hosts": {"wsl": {"ansible_connection": "local",
-                                                  "ansible_host": "localhost"}}},
+                "frp_clients": {"hosts": {"origin": {"ansible_connection": "local",
+                                                     "ansible_host": "localhost"}}},
             },
         }
     }

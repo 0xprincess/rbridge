@@ -13,7 +13,7 @@ NOTES = (
     "Authentication challenges and redirects do not prove authenticated application or login health.",
     "Public probes see only the caller's network; repeat from the intended external network.",
     "Exiting the CLI process does not stop systemd publications; remove and apply to withdraw them.",
-    "WSL sleep or shutdown stops availability even when systemd units are enabled.",
+    "Client sleep or shutdown, including WSL distribution shutdown, stops availability even when systemd units are enabled.",
 )
 STAGES = {
     "transport": "SSH transport evidence",

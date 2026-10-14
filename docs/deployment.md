@@ -2,12 +2,36 @@
 
 ## Supported setup
 
-The Linux/WSL controller needs Python 3.11+, OpenSSH and the pinned
-`ansible-core` in `requirements-dev.txt`. Managed hosts require Ubuntu 24.04+,
-systemd, OpenSSH and amd64/arm64. Native Windows services and other distributions
-are outside this deployment's scope. Enable
-[WSL systemd](https://learn.microsoft.com/en-us/windows/wsl/systemd) first; these
-roles do not edit WSL boot configuration or shut down distributions.
+The controller is any Linux system, including WSL2, with Python 3.11+, OpenSSH
+and the pinned `ansible-core` in `requirements-dev.txt`.
+
+Managed hosts (relay and origin) need systemd 247+ as the service manager,
+OpenSSH, Python 3.8+ for Ansible, amd64/arm64, and one of these distribution
+families. The roles select packages and the native SSH unit by Ansible's
+`os_family`; other families fail validation before any change.
+
+| Family | Examples | Dependencies installed with | Native SSH unit |
+| --- | --- | --- | --- |
+| Debian | Debian 12+, Ubuntu 22.04+ | `apt` (cache refreshed) | `ssh.service` |
+| RedHat | Fedora, RHEL/AlmaLinux/Rocky 9+, CentOS Stream | `dnf` | `sshd.service` |
+| Suse | openSUSE Tumbleweed, Leap 16 | `zypper` | `sshd.service` |
+| Archlinux | Arch Linux | `pacman -S --needed` | `sshd.service` |
+
+Arch does not support partial upgrades, so the roles never refresh pacman
+databases: run `pacman -Syu` before applying. Hosts without systemd (Alpine,
+Void, OpenRC Gentoo), immutable/declarative systems such as NixOS, and native
+Windows services are out of scope.
+
+On SELinux hosts (Fedora/RHEL family and recent openSUSE default to enforcing),
+the roles install `policycoreutils-python-utils` and add two persistent local
+policy customizations: `bin_t` for `/usr/local/lib/rbridge` and `ssh_port_t` for
+the managed SSH backend port. Every rbridge unit then runs as
+`unconfined_service_t`, still restricted by its systemd sandbox. The roles never
+disable or otherwise relax SELinux enforcement. AppArmor needs no changes. Host
+firewalls (`firewalld`, `ufw`, `nftables`) remain administrator-owned.
+
+Under WSL, enable [WSL systemd](https://learn.microsoft.com/en-us/windows/wsl/systemd)
+first; these roles do not edit WSL boot configuration or shut down distributions.
 
 Administrators need root/sudo on both hosts. When `frp_managed_ssh` is true, the
 client login account must exist, be non-root, have a usable shell, and satisfy
@@ -44,11 +68,13 @@ or `~/.config/rbridge-private`. Install with `sh install.sh` from a checkout;
 the installed command bundles its own Python environment and Ansible roles and
 works from any directory. Contributors may still run `python scripts/bridge.py`
 in a source virtualenv. The workspace must be owned by the invoking user, outside
-every checkout and WSL `/mnt`, with directory mode 0700 and file mode 0600.
+every checkout and on a filesystem that enforces Unix permissions (not a Windows
+drive such as WSL `/mnt/c`, nor FAT/NTFS/SMB), with directory mode 0700 and file
+mode 0600.
 
 `init` generates only a transport identity: `frp_managed_ssh: false` and explicit
-`frp_services: []`. It targets the current Linux/WSL host as the origin and an
-existing relay via pinned SSH. Review `inventory.yml` for remote origins or
+`frp_services: []`. It targets the current Linux machine (or WSL distribution)
+as the origin and an existing relay via pinned SSH. Review `inventory.yml` for remote origins or
 administrative/sudo differences. `controller.yml` stores the administrative key
 path, not a second key. The administrative key must be usable without an SSH
 password prompt; an encrypted key can be loaded into the user's SSH agent.
@@ -342,7 +368,7 @@ The deployment account requires root/passwordless sudo. Inputs are masked and
 written under the runner's private temporary directory, then removed in an
 `always()` cleanup step. Abrupt termination can bypass cleanup; prefer ephemeral
 runners. Never expose privileged self-hosted runners to untrusted PRs. Deploy
-WSL clients locally; GitHub-hosted runners cannot reach private local WSL.
+WSL or other private origins locally; GitHub-hosted runners cannot reach them.
 
 Do not use `--diff`, verbose inventory dumps or unredacted logs around private
 inputs. `--syntax-check` does not contact hosts; fresh-host check mode cannot

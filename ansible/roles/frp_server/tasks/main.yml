@@ -34,6 +34,22 @@
   no_log: true
   diff: false
 
+- name: Apply SELinux labels to the relay account keys
+  ansible.builtin.command:
+    argv: [restorecon, -R, -v, /var/lib/rbridge-relay]
+  register: frp_selinux_relay_labels
+  changed_when: frp_selinux_relay_labels.stdout | length > 0
+  when: frp_selinux
+
+# Some distributions ship sshd_config with the drop-in Include but no directory.
+- name: Create the system SSH drop-in directory
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Restrict SSH forwarding for the project relay account
   ansible.builtin.template:
     src: sshd-relay.conf.j2
@@ -66,11 +82,16 @@
 - name: Require the account-specific SSH restrictions to be effective
   ansible.builtin.assert:
     that:
-      - "'allowtcpforwarding local' in frp_relay_effective_policy.stdout_lines"
-      - "'allowstreamlocalforwarding no' in frp_relay_effective_policy.stdout_lines"
-      - "'authenticationmethods publickey' in frp_relay_effective_policy.stdout_lines"
-    fail_msg: The existing SSH policy must include the project account restrictions.
+      - "'allowtcpforwarding local' in frp_relay_policy_lines"
+      - "'allowstreamlocalforwarding no' in frp_relay_policy_lines"
+      - "'authenticationmethods publickey' in frp_relay_policy_lines"
+    fail_msg: >-
+      The relay account restrictions are not effective. The system sshd_config
+      must contain "Include /etc/ssh/sshd_config.d/*.conf" before any Match block.
   no_log: true
+  vars:
+    # OpenSSH 10 prints sshd -T keywords in mixed case; older releases lowercase.
+    frp_relay_policy_lines: "{{ frp_relay_effective_policy.stdout_lines | map('lower') | list }}"
 
 - name: Prepare public listeners and remove stale listeners before changing FRP
   ansible.builtin.include_tasks: publish.yml

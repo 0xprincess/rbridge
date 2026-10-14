@@ -7,8 +7,9 @@ rbridge publish 3000 --name demo --hostname demo.example.invalid --access public
 After a one-time setup, that command puts a local app on your own domain over
 HTTPS, through a relay you control, with no router port forwarding.
 
-rbridge runs on Ubuntu or Ubuntu WSL2 and publishes web applications and TCP
-services with [FRP](https://github.com/fatedier/frp). Ansible manages FRP over an
+rbridge runs on modern systemd Linux distributions, including WSL2, and
+publishes web applications and TCP services with
+[FRP](https://github.com/fatedier/frp). Ansible manages FRP over an
 outbound, host-pinned SSH connection; systemd reconnects it. Caddy publishes
 HTTPS, with optional Basic authentication or OIDC browser login. The
 origin-to-relay transport is direct SSH. Native SSH clients on filtered
@@ -35,7 +36,7 @@ flowchart LR
     visitor[TCP client] -->|explicit public port| socket[Socket proxy]
     web --> loopback[Relay-local FRP service ports]
     socket --> loopback
-    client[Ubuntu / WSL FRP client] -->|outbound encrypted SSH| relay[Restricted relay account]
+    client[Linux / WSL FRP client] -->|outbound encrypted SSH| relay[Restricted relay account]
     relay -->|loopback control port| loopback
     loopback -. reverse tunnel .-> client
     client --> backend[Configured application backends]
@@ -51,12 +52,13 @@ flowchart LR
 - Explicit per-web-app `public`, `application`, `basic`, or `oidc` access policy.
 - Optional dedicated key-only SSH service, separate login/relay keys, and a
   forwarding-only relay account. Native host SSH remains separate.
-- Ubuntu 24.04+ / systemd roles for amd64 and arm64, checksum-pinned FRP, Caddy
-  and oauth2-proxy releases, and unprivileged services.
+- systemd 247+ roles for Debian/Ubuntu, Fedora/RHEL-family, openSUSE and Arch
+  Linux on amd64 and arm64 (SELinux-aware), checksum-pinned FRP, Caddy and
+  oauth2-proxy releases, and unprivileged services.
 - Configuration validation, layered `doctor` diagnostics, native SSH bulk
   transfer checks using explicit client profiles, and stale service cleanup.
 - Private input generation, CI deployment regressions and an optional manual
-  GitHub Actions relay deployment. Windows logon startup can keep WSL alive.
+  GitHub Actions relay deployment. Optional Windows logon startup keeps WSL alive.
 
 All raw FRP service ports and management APIs stay on relay/client loopback.
 Only explicit TCP publications and Caddy's web listeners are public. A web
@@ -64,7 +66,7 @@ application has no public raw port that could bypass its access policy.
 
 ## Install the CLI
 
-From this checkout, on Linux or WSL:
+From this checkout, on any Linux distribution or WSL:
 
 ```bash
 sh install.sh
@@ -74,7 +76,8 @@ rbridge --help
 
 Add that PATH setting to your shell profile if needed. The installer requires
 Python 3.11+ with `venv`/pip support, OpenSSH, `tar`, and Internet access for Python
-dependencies. On Ubuntu, install `python3-venv` if virtualenv creation fails.
+dependencies. If virtualenv creation fails, install your distribution's venv
+support (for example `python3-venv` on Debian/Ubuntu).
 No sudo is needed for installation.
 
 The command is installed at `~/.local/bin/rbridge`. Its isolated Python
@@ -85,7 +88,8 @@ logs or Git history are copied from the checkout.
 
 For another location/interpreter, use
 `sh install.sh --prefix /path/to/prefix --python python3.12`, then add that
-prefix's `bin` directory to PATH. Use the Linux filesystem, not WSL `/mnt`.
+prefix's `bin` directory to PATH. Use a Linux filesystem that enforces
+permissions: not a Windows drive such as WSL `/mnt/c`, or a FAT/NTFS/SMB mount.
 
 **Update:** obtain the desired project revision and rerun the installer with the
 same prefix. Each installation builds a separate release and switches to it only
@@ -102,8 +106,9 @@ for those actions.
 ## Quick start
 
 Use a Linux/WSL controller with Python 3.11+, OpenSSH and sudo. Both managed hosts
-need Ubuntu 24.04+ with systemd; enable systemd in WSL first. The web-first
-workspace uses the current Linux/WSL host as the origin and needs no login account.
+need a [supported systemd distribution](docs/deployment.md#supported-setup); under
+WSL, enable systemd first. The web-first workspace uses the current machine as the
+origin and needs no login account.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -124,8 +129,9 @@ rbridge apply --ask-become-pass
 ```
 
 Replace the documentation-only relay hostname. `init` creates private inputs
-outside the checkout, on the Linux filesystem (not WSL `/mnt`), and refuses to
-overwrite existing keys. It does **not** provision a VPS or publish a service.
+outside the checkout, on a permission-enforcing Linux filesystem (not WSL
+`/mnt/c`), and refuses to overwrite existing keys. It does **not** provision a
+VPS or publish a service.
 Review the generated inventory before `apply`, which deploys both hosts using
 Ansible. Omit `--ask-become-pass` when sudo is passwordless. Administrative SSH is
 non-interactive: load an encrypted administrative key into your agent first.
@@ -195,7 +201,7 @@ redirect does not prove an authenticated login. See [operations](docs/operations
 Use `scripts/tunnel.py bulk-check --ssh-config /private/client.conf --host tunnel`
 to verify sustained native SSH upload/download from the actual client network.
 
-For WSL, run from Windows PowerShell after deployment:
+Under WSL, run from Windows PowerShell after deployment (not needed on other Linux):
 
 ```powershell
 ./scripts/register-wsl-startup.ps1 -Distribution Ubuntu-24.04

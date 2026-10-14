@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Destructive regression suite for disposable Ubuntu/systemd hosts, never production.
+"""Destructive regression suite for disposable systemd Linux hosts, never production.
 
 Controller prerequisites: requirements-dev.txt, scripts/fixtures/requirements.txt,
 Playwright Chromium (`python -m playwright install --with-deps chromium`), curl,
-OpenSSH, OpenSSL and (internal-CA mode only) libnss3-tools (certutil). Inventory must contain frp_servers
+OpenSSH, OpenSSL and (internal-CA mode only) NSS certutil (libnss3-tools/nss-tools). Inventory must contain frp_servers
 and frp_clients. Admin SSH aliases must have pinned host keys and passwordless sudo.
 
 Two hosts:
@@ -34,6 +34,7 @@ import re
 import shlex
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,29 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 NAMES = ("public", "basic", "app", "oidc", "secure", "idp")
 CA_PATH = "/var/lib/rbridge-web/data/caddy/pki/authorities/local/root.crt"
+# Fixture hosts may be any supported family: Debian, RedHat, Suse or Archlinux.
+# Trust anchor directories, in Debian, Fedora/RHEL, openSUSE and Arch order.
+TRUST_ANCHORS = ("/usr/local/share/ca-certificates", "/etc/pki/ca-trust/source/anchors",
+                 "/etc/pki/trust/anchors", "/etc/ca-certificates/trust-source/anchors")
+HOST_SHELL = r"""
+packages() {
+    if command -v apt-get >/dev/null; then
+        apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq $1
+    elif command -v dnf >/dev/null; then dnf -y -q install $2
+    elif command -v zypper >/dev/null; then zypper -n -q install --no-recommends $3
+    elif command -v pacman >/dev/null; then pacman -S --needed --noconfirm $4
+    else echo 'unsupported package manager' >&2; return 1
+    fi
+}
+start_ssh() { systemctl start ssh.service 2>/dev/null || systemctl start sshd.service; }
+anchors() {
+    for directory in """ + " ".join(TRUST_ANCHORS) + r"""; do
+        if [ -d "$directory" ]; then echo "$directory"; return 0; fi
+    done
+    return 1
+}
+refresh_trust() { if command -v update-ca-trust >/dev/null; then update-ca-trust; else update-ca-certificates; fi; }
+"""
 ARTIFACTS = None
 
 
@@ -118,6 +142,11 @@ class Suite:
         data = content.encode() if isinstance(content, str) else content
         self.remote(host, "umask 077; cat > " + shlex.quote(path) + "; chmod " + mode + " " +
                     shlex.quote(path), data=data)
+
+    def trust_root(self, host, name, content):
+        """Add a fixture root to the host's distribution trust store."""
+        self.remote(host, HOST_SHELL + "directory=$(anchors) && umask 022 && cat > \"$directory/" + name +
+                    "\" && refresh_trust", data=content)
 
     def deploy(self, values=None, fail=False, *, limit=None):
         path = self.folder / "deployment.json"
@@ -217,19 +246,21 @@ class Suite:
         self.cleanup()
         for host in hosts:
             self.prepared.add(host)
-            self.remote(host, "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
-                        "openssh-server python3-aiohttp ca-certificates curl && "
-                        "install -d -m 700 /opt/frp-field && systemctl start ssh")
-            self.put(host, "/usr/local/share/ca-certificates/frp-field-origin.crt", (self.folder / "ca.crt").read_bytes(), "644")
+            self.remote(host, HOST_SHELL + "packages 'openssh-server python3-aiohttp ca-certificates curl' "
+                        "'openssh-server python3-aiohttp ca-certificates curl' "
+                        "'openssh-server python3-aiohttp ca-certificates curl' "
+                        "'openssh python-aiohttp ca-certificates curl' && "
+                        "install -d -m 700 /opt/frp-field && start_ssh")
+            self.trust_root(host, "frp-field-origin.crt", (self.folder / "ca.crt").read_bytes())
             entries = self.address + " " + " ".join(f"{name}.{self.domain}" for name in NAMES)
             self.remote(host, "printf '%s\\n' " + shlex.quote(entries + " # frp-field-test") +
-                        " '127.0.0.1 origin.fixture.test # frp-field-test' >> /etc/hosts; update-ca-certificates")
+                        " '127.0.0.1 origin.fixture.test # frp-field-test' >> /etc/hosts")
         # Go caches system roots within the Caddy process. A recovered run has a
         # newly generated fixture CA; reload alone would retain the old roots.
         self.remote("relay", "if systemctl is-active --quiet rbridge-web.service; "
                     "then systemctl restart rbridge-web.service; fi")
-        self.remote("client", "(command -v docker >/dev/null || "
-                    "DEBIAN_FRONTEND=noninteractive apt-get install -y -qq docker.io) && systemctl start docker")
+        self.remote("client", HOST_SHELL + "(command -v docker >/dev/null || "
+                    "packages docker.io moby-engine docker docker) && systemctl start docker")
         for name in ("origin.crt", "origin.key"):
             self.put("client", "/opt/frp-field/" + name, (self.folder / name).read_bytes())
         self.put("client", "/opt/frp-field/origin.py", (ROOT / "scripts/fixtures/field-origin.py").read_bytes())
@@ -255,13 +286,12 @@ class Suite:
         self.deploy(bootstrap)
         roots = (self.folder / "ca.crt").read_bytes()
         if self.args.public_tls:
-            roots += Path("/etc/ssl/certs/ca-certificates.crt").read_bytes()
+            roots += Path(ssl.get_default_verify_paths().openssl_cafile).read_bytes()
         else:
             caddy_root = self.remote("relay", "cat " + CA_PATH).stdout
             roots += caddy_root
             for host in (("relay",) if self.args.local else ("relay", "client")):
-                self.put(host, "/usr/local/share/ca-certificates/frp-field-caddy.crt", caddy_root, "644")
-                self.remote(host, "update-ca-certificates")
+                self.trust_root(host, "frp-field-caddy.crt", caddy_root)
             (self.folder / "caddy.crt").write_bytes(caddy_root)
         self.trust.write_bytes(roots)
         eventually(lambda: self.http("idp", "/.well-known/openid-configuration", status=200),
@@ -742,15 +772,15 @@ print(json.dumps(result,sort_keys=True))
         self.mark("final publication removal and re-publishing from idle infrastructure")
 
     def cleanup(self):
+        fixture_roots = " ".join(directory + "/frp-field-" + kind + ".crt"
+                                 for directory in TRUST_ANCHORS for kind in ("origin", "caddy"))
         for host in self.prepared:
-            self.remote(host, "systemctl stop frp-field-origin 2>/dev/null; docker rm -f frp-field-dex 2>/dev/null; "
-                        "rm -f /etc/systemd/system/frp-field-origin.service "
-                        "/usr/local/share/ca-certificates/frp-field-origin.crt "
-                        "/usr/local/share/ca-certificates/frp-field-caddy.crt; "
+            self.remote(host, HOST_SHELL + "systemctl stop frp-field-origin 2>/dev/null; docker rm -f frp-field-dex 2>/dev/null; "
+                        "rm -f /etc/systemd/system/frp-field-origin.service " + fixture_roots + "; "
                         "rm -rf /opt/frp-field; "
                         "python3 -c \"from pathlib import Path; p=Path('/etc/hosts'); "
                         "p.write_text(''.join(x for x in p.read_text().splitlines(True) if '# frp-field-test' not in x))\"; "
-                        "systemctl daemon-reload; update-ca-certificates", allow_failure=True)
+                        "systemctl daemon-reload; refresh_trust", allow_failure=True)
 
     def execute(self):
         if self.args.require_dns:
@@ -758,8 +788,8 @@ print(json.dumps(result,sort_keys=True))
                 addresses = {item[4][0] for item in socket.getaddrinfo(name + "." + self.domain, 443)}
                 require(self.address in addresses, "Public DNS does not resolve to relay")
         for host in (("relay",) if self.args.local else ("relay", "client")):
-            self.remote(host, "apt-get update -qq && DEBIAN_FRONTEND=noninteractive "
-                        "apt-get install -y -qq openssh-server python3-yaml && systemctl start ssh")
+            self.remote(host, HOST_SHELL + "packages 'openssh-server python3-yaml' 'openssh-server python3-pyyaml' "
+                        "'openssh-server python3-PyYAML' 'openssh python-yaml' && start_ssh")
         self.make_keys()
         self.certificates()
         success = False

@@ -42,8 +42,8 @@ discovery = load_script("bridge_status")
 
 def workspace_path(value):
     directory = Path(value).expanduser().resolve()
-    if os.name != "posix" or str(directory).startswith("/mnt/"):
-        raise ValueError("Use a private directory on the Linux/WSL Linux filesystem, not /mnt.")
+    if os.name != "posix":
+        raise ValueError("Use a private directory on a Linux filesystem.")
     if any((ancestor / ".git").exists() for ancestor in (directory, *directory.parents)):
         raise ValueError("Private workspace must be outside every Git checkout.")
     if directory.exists():
@@ -339,7 +339,7 @@ def public_checks(config, services, timeout):
 
 def parser():
     result = argparse.ArgumentParser(prog="rbridge", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""One-time setup (an existing Ubuntu relay, verified host pin and admin key are required):
+        epilog="""One-time setup (an existing systemd Linux relay, verified host pin and admin key are required):
   rbridge init --relay relay.example.invalid --known-hosts /private/verified-hosts --admin-key /private/admin-key
   rbridge apply --ask-become-pass
 Everyday publishing (hostname DNS must point to the relay):
@@ -350,7 +350,7 @@ Everyday publishing (hostname DNS must point to the relay):
   rbridge remove demo
 Publish/remove deploy by default; --dry-run previews without changing files or hosts.
 Commands use $PRIVATE or ~/.config/rbridge-private. Endpoint disclosure is opt-in.
-Systemd publications outlive this CLI; WSL must remain awake. DNS/firewall/cloud provisioning
+Systemd publications outlive this CLI; the origin (including any WSL distribution) must stay running. DNS/firewall/cloud provisioning
 and full infrastructure uninstall remain operator-owned. Run tunnel.py for advanced diagnostics.""")
     commands = result.add_subparsers(dest="command", required=True)
     for name, help_text in (("init", "Prepare a web-only private workspace; publish nothing"),
