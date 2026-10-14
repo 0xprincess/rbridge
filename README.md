@@ -7,6 +7,10 @@ rbridge publish 3000 --name demo --hostname demo.example.invalid --access public
 After a one-time setup, that command puts a local app on your own domain over
 HTTPS, through a relay you control, with no router port forwarding.
 
+<p align="center">
+  <img src="reference-dithered-16color.png" alt="「虹の橋」 Rainbow Bridge: dithered blue illustration of a suspension bridge seen through a window" width="400">
+</p>
+
 rbridge runs on modern systemd Linux distributions, including WSL2, and
 publishes web applications and TCP services with
 [FRP](https://github.com/fatedier/frp). Ansible manages FRP over an
@@ -25,10 +29,6 @@ matched measurements of this project, Cloudflare Quick Tunnel, Tailscale private
 mesh and public Funnel: throughput, checked HTTPS/SSH transfers, latency, CPU/RSS
 and recovery on temporary Hetzner VPSs. Separate matched batches and different
 access paths prevent a universal speed ranking.
-
-The [`v0.1` release](https://github.com/0xprincess/rbridge/releases/tag/v0.1)
-preserves the complete SSH-only baseline. Generalized publishing and the `rbridge`
-CLI are available on `main`; [deployment](docs/deployment.md) describes rollback.
 
 ```mermaid
 flowchart LR
