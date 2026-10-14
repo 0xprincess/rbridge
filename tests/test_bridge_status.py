@@ -25,8 +25,8 @@ def http_service(mode="public"):
     access = {"mode": mode}
     if mode == "basic":
         access["users"] = {"private-account": "$2b$12$" + "a" * 53}
-    return {"name": "private-web", "protocol": "http", "backend": "http://backend.private.invalid:8080",
-            "relay_port": 12080, "hostname": "web.private.invalid", "access": access}
+    return {"name": "private-web", "protocol": "http", "backend": "http://backend.private.relay-ip.rbr.sh:8080",
+            "relay_port": 12080, "hostname": "web.private.relay-ip.rbr.sh", "access": access}
 
 
 def tcp_service(**changes):
@@ -38,13 +38,13 @@ def tcp_service(**changes):
 
 def check(index=1, state="ok", stage="public_ingress"):
     return {"service": index, "stage": stage, "status": state,
-            "message": "private-account secret-token /home/" + "private/key backend.private.invalid",
+            "message": "private-account secret-token /home/" + "private/key backend.private.relay-ip.rbr.sh",
             "action": "cat /home/" + "private/key"}
 
 
 class ServiceDiscoveryTests(unittest.TestCase):
     def setUp(self):
-        self.config = {"frp_server_address": "relay.private.invalid", "frp_token": "secret-token",
+        self.config = {"frp_server_address": "relay.private.relay-ip.rbr.sh", "frp_token": "secret-token",
                        "frp_admin_password": "admin-secret", "frp_login_user": "private_user",
                        "frp_login_public_key": "ssh-ed25519 AAAA private-comment",
                        "frp_relay_private_key": "PRIVATE KEY MATERIAL", "frp_managed_ssh": True}
@@ -57,8 +57,8 @@ class ServiceDiscoveryTests(unittest.TestCase):
         result = self.describe([http_service("basic"), tcp_service()], checks=[check(), check(2)],
                                deployment="/private/path")
         output = json.dumps(result) + status.format_services(result)
-        for private in ("private-web", "private-tcp", "backend.private.invalid", "web.private.invalid",
-                        "relay.private.invalid", "private-account", "private_user", "secret-token",
+        for private in ("private-web", "private-tcp", "backend.private.relay-ip.rbr.sh", "web.private.relay-ip.rbr.sh",
+                        "relay.private.relay-ip.rbr.sh", "private-account", "private_user", "secret-token",
                         "admin-secret", "PRIVATE KEY MATERIAL", "/home/private", "$2b$", "/private/path"):
             with self.subTest(private=private):
                 self.assertNotIn(private, output)
@@ -70,16 +70,16 @@ class ServiceDiscoveryTests(unittest.TestCase):
         result = self.describe([http_service("basic")], reveal=True, checks=[check()])
         row = result["services"][0]
         self.assertEqual(row["name"], "private-web")
-        self.assertEqual(row["endpoint"], "https://web.private.invalid/")
+        self.assertEqual(row["endpoint"], "https://web.private.relay-ip.rbr.sh/")
         self.assertEqual(shlex.split(row["command"]),
                          ["curl", "--show-error", "--include", "--", row["endpoint"]])
         output = json.dumps(result) + status.format_services(result)
         for secret in ("private-account", "$2b$", "secret-token", "admin-secret", "PRIVATE KEY MATERIAL", "/home/private"):
             self.assertNotIn(secret, output)
-        self.assertNotIn("backend.private.invalid", output)
+        self.assertNotIn("backend.private.relay-ip.rbr.sh", output)
 
     def test_tcp_hostname_and_ipv6_endpoints(self):
-        for host, expected in (("relay.private.invalid", "relay.private.invalid:2222"),
+        for host, expected in (("relay.private.relay-ip.rbr.sh", "relay.private.relay-ip.rbr.sh:2222"),
                                ("2001:db8::123", "[2001:db8::123]:2222")):
             with self.subTest(host=host):
                 self.config["frp_server_address"] = host
@@ -90,7 +90,7 @@ class ServiceDiscoveryTests(unittest.TestCase):
 
     def test_generic_tcp_never_infers_ssh_from_name(self):
         for changes in ({"backend": "127.0.0.1:5432"}, {"backend": "localhost:2222"},
-                        {"backend": "[::1]:2222"}, {"backend": "elsewhere.invalid:2222"}):
+                        {"backend": "[::1]:2222"}, {"backend": "elsewhere.relay-ip.rbr.sh:2222"}):
             with self.subTest(changes=changes):
                 row = self.describe([tcp_service(name="ssh", **changes)], reveal=True)["services"][0]
                 self.assertIsNone(row["command"])
@@ -108,8 +108,8 @@ class ServiceDiscoveryTests(unittest.TestCase):
             self.assertIsNone(self.describe([tcp_service(backend="127.0.0.1:2323")], reveal=True)["services"][0]["command"])
 
     def test_connection_arguments_do_not_accept_embedded_credentials_or_shell_code(self):
-        for host in ("user:password@host.invalid", "host.invalid;id", "$(id)", "-oProxyCommand=id",
-                     "https://host.invalid/path", "host.invalid\nsecret"):
+        for host in ("user:password@" + "host.relay-ip.rbr.sh", "host.relay-ip.rbr.sh;id", "$(id)", "-oProxyCommand=id",
+                     "https://host.relay-ip.rbr.sh/path", "host.relay-ip.rbr.sh\nsecret"):
             with self.subTest(host=host):
                 self.config["frp_server_address"] = host
                 result = self.describe([tcp_service()], reveal=True)

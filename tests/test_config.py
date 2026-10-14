@@ -21,13 +21,13 @@ def tcp(**changes):
 
 def web(**changes):
     value = dict(name="app", protocol="http", backend="http://localhost:8080", relay_port=18080,
-                 hostname="app.example.invalid", access={"mode": "public"})
+                 hostname="app.relay-ip.rbr.sh", access={"mode": "public"})
     value.update(changes)
     return value
 
 
 def oidc():
-    return dict(issuer_url="https://identity.example.invalid/issuer", client_id="example-app",
+    return dict(issuer_url="https://identity.relay-ip.rbr.sh/issuer", client_id="example-app",
                 client_secret="not-a-real-credential", cookie_secret=base64.urlsafe_b64encode(bytes(range(32))).decode())
 
 
@@ -47,15 +47,15 @@ class ServiceModelTests(unittest.TestCase):
 
     def test_multiple_services_preserve_inputs_and_normalize_backends(self):
         source = [tcp(), tcp(name="database", backend="db.internal:5432", relay_port=15432, public_port=25432),
-                  web(), web(name="secure", backend="https://Origin.Example.Invalid:8443/", relay_port=18443,
-                             hostname="Secure.Example.Invalid", access={"mode": "application"})]
+                  web(), web(name="secure", backend="https://Origin.relay-ip.rbr.sh:8443/", relay_port=18443,
+                             hostname="Secure.relay-ip.rbr.sh", access={"mode": "application"})]
         original = copy.deepcopy(source)
         result = CONFIG.normalize_services(source, reserved_ports=(7000, 22, 17401, 80, 443))
         self.assertEqual(source, original)
         self.assertEqual([item["backend_scheme"] for item in result], ["tcp", "tcp", "http", "https"])
         self.assertEqual(result[1]["backend_host"], "db.internal")
-        self.assertEqual(result[3]["backend_host"], "origin.example.invalid")
-        self.assertEqual(result[3]["hostname"], "secure.example.invalid")
+        self.assertEqual(result[3]["backend_host"], "origin.relay-ip.rbr.sh")
+        self.assertEqual(result[3]["hostname"], "secure.relay-ip.rbr.sh")
         self.assertEqual(result[3]["backend_port"], 8443)
         self.assertEqual(result[0]["public_port"], result[0]["backend_port"])
 
@@ -83,7 +83,7 @@ class ServiceModelTests(unittest.TestCase):
                 del value[field]
                 with self.subTest(field=field, protocol=factory.__name__):
                     self.assert_invalid([value], "frp_services[0]")
-        for value in (tcp(hostname="app.example.invalid"), tcp(access={"mode": "public"}), web(public_port=18081),
+        for value in (tcp(hostname="app.relay-ip.rbr.sh"), tcp(access={"mode": "public"}), web(public_port=18081),
                       tcp(extra="unsupported"), tcp(protocol="udp")):
             self.assert_invalid([value])
 
@@ -91,10 +91,10 @@ class ServiceModelTests(unittest.TestCase):
         for name in ("../app", "app.service", "a\nb", "APP", "-app", "app_1", "x" * 64, 42):
             self.assert_invalid([tcp(name=name)], ".name")
         self.assert_invalid([tcp(), tcp(relay_port=12223, public_port=2223)], ".name")
-        for hostname in ("*.example.invalid", "localhost", "-app.example.invalid", "app.example.invalid:443",
-                         "app.example.invalid {", "https://app.example.invalid", "127.0.0.1"):
+        for hostname in ("*.relay-ip.rbr.sh", "localhost", "-app.relay-ip.rbr.sh", "app.relay-ip.rbr.sh:443",
+                         "app.relay-ip.rbr.sh {", "https://app.relay-ip.rbr.sh", "127.0.0.1"):
             self.assert_invalid([web(hostname=hostname)], ".hostname")
-        self.assert_invalid([web(), web(name="other", relay_port=18081, hostname="APP.EXAMPLE.INVALID")], ".hostname")
+        self.assert_invalid([web(), web(name="other", relay_port=18081, hostname="APP.RELAY-IP.RBR.SH")], ".hostname")
 
     def test_unsafe_and_ambiguous_backends_rejected(self):
         for backend in ("host", "host:0", "host:65536", "host:-1", "host:abc", "host:22\n", "-host:22",
@@ -164,7 +164,7 @@ class ServiceModelTests(unittest.TestCase):
             provider = oidc()
             del provider[field]
             self.assert_invalid([authenticated_web()], "frp_oidc", oidc=provider)
-        for field, value in (("issuer_url", "http://identity.example.invalid"), ("issuer_url", "https://" + "user:secret@host"),
+        for field, value in (("issuer_url", "http://identity.relay-ip.rbr.sh"), ("issuer_url", "https://" + "user:secret@host"),
                              ("client_id", ""), ("client_secret", "secret\nvalue"), ("cookie_secret", "invalid"),
                              ("cookie_secret", base64.urlsafe_b64encode(b"short").decode())):
             provider = oidc()
@@ -219,7 +219,7 @@ class RevisionTokenTests(unittest.TestCase):
             (0, "public_port", 2223),
             (1, "backend", "http://other.internal:8080"),
             (1, "backend", "https://localhost:8080"),
-            (1, "hostname", "other.example.invalid"),
+            (1, "hostname", "other.relay-ip.rbr.sh"),
             (1, "access", {"mode": "application"}),
             (1, "access", {"mode": "basic", "users": {"alice": "$2b$12$" + "A" * 53}}),
         ]
@@ -249,7 +249,7 @@ class RevisionTokenTests(unittest.TestCase):
                         {"allowed_emails": ["alice@example.invalid"]}):
             with self.subTest(fields=list(changes)):
                 self.assertNotEqual(token, self.token([authenticated_web(**changes)]))
-        for field, value in (("issuer_url", "https://other.example.invalid"),
+        for field, value in (("issuer_url", "https://other.relay-ip.rbr.sh"),
                              ("client_id", "other-app"), ("client_secret", "another-private-credential"),
                              ("cookie_secret", base64.urlsafe_b64encode(b"x" * 32).decode())):
             provider = oidc()
@@ -262,7 +262,7 @@ class RevisionTokenTests(unittest.TestCase):
     def test_normalized_hostname_and_oidc_identity_casing_is_shared(self):
         lower = authenticated_web(allowed_domains=["example.invalid"], allowed_emails=["alice@example.invalid"])
         upper = authenticated_web(allowed_domains=["EXAMPLE.INVALID"], allowed_emails=["Alice@EXAMPLE.INVALID"])
-        upper["hostname"] = "APP.EXAMPLE.INVALID"
+        upper["hostname"] = "APP.RELAY-IP.RBR.SH"
         self.assertEqual(self.token([lower]), self.token([upper]))
 
 

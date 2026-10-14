@@ -113,7 +113,7 @@ conflict. Updating a service retains its existing relay port.
 ```yaml
 mode: oidc
 allowed_domains:
-  - example.invalid
+  - example.com
 ```
 
 OIDC provider settings still belong in `secrets.yml`; register the exact callback
@@ -155,7 +155,7 @@ For an advanced SSH-first workspace, generate the isolated managed login service
 
 ```bash
 python scripts/create-secrets.py --output "$PRIVATE" \
-  --server-host relay.example.invalid --client-user developer \
+  --server-host relay.<relay-ip>.rbr.sh --client-user developer \
   --known-hosts "$HOME/.config/verified-relay-hosts"
 ```
 
@@ -257,10 +257,17 @@ access policy. Correct the relay failure and apply both hosts to restore ingress
 
 ## HTTPS and DNS
 
-Point every published hostname to the relay. Permit inbound TCP 80/443 and allow
-outbound DNS/ACME traffic. Caddy obtains and renews certificates automatically;
-HTTP redirects to HTTPS. Configure only DNS you control and can validate.
-Wildcards and DNS-provider API automation are not implemented.
+Every published hostname must resolve to the relay, using either:
+
+- **`rbr.sh` DNS:** `rbr.sh` is a nip.io alias, so `<name>.<relay-ip>.rbr.sh`
+  resolves to the relay IPv4 address embedded in the name without DNS records.
+  The examples in these docs use this form.
+- **Your own domain:** point an A record such as `app.example.com` at the relay.
+  Configure only DNS you control and can validate.
+
+Permit inbound TCP 80/443 and allow outbound DNS/ACME traffic. Caddy obtains and
+renews certificates automatically; HTTP redirects to HTTPS. Wildcards and
+DNS-provider API automation are not implemented.
 
 The dedicated `rbridge-web` unit uses its own pinned Caddy binary and
 `/etc/rbridge/web/Caddyfile`; it does not import/adopt `/etc/caddy` or replace

@@ -138,7 +138,7 @@ def generate(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, epilog=(
         "Requires Python 3.11+, PyYAML and OpenSSH. Run from the repository: "
-        "python3 scripts/create-secrets.py --output /private/tunnel --server-host relay.example.invalid "
+        "python3 scripts/create-secrets.py --output /private/tunnel --server-host relay.<relay-ip>.rbr.sh "
         "--known-hosts /private/known_hosts --client-user developer. "
         "For non-SSH publishing add --no-managed-ssh --services-file /private/services.yml. "
         "The service file is a flat YAML mapping containing frp_services, and frp_oidc when needed. "

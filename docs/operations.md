@@ -138,7 +138,7 @@ Host tunnel-proxied
     ProxyCommand /usr/bin/nc -X 5 -x 127.0.0.1:10808 %h %p
 
 Host tunnel-direct tunnel-proxied
-    HostName relay.example.invalid
+    HostName relay.<relay-ip>.rbr.sh
     Port 2222
     User developer
     IdentityFile /private/tunnel/login_id_ed25519

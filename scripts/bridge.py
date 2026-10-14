@@ -340,11 +340,13 @@ def public_checks(config, services, timeout):
 def parser():
     result = argparse.ArgumentParser(prog="rbridge", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""One-time setup (an existing systemd Linux relay, verified host pin and admin key are required):
-  rbridge init --relay relay.example.invalid --known-hosts /private/verified-hosts --admin-key /private/admin-key
+  rbridge init --relay relay.<relay-ip>.rbr.sh --known-hosts /private/verified-hosts --admin-key /private/admin-key
   rbridge apply --ask-become-pass
-Everyday publishing (hostname DNS must point to the relay):
-  rbridge publish 3000 --name demo --hostname demo.example.invalid --access public --dry-run
-  rbridge publish 3000 --name demo --hostname demo.example.invalid --access public
+Everyday publishing (the hostname must resolve to the relay: <name>.<relay-ip>.rbr.sh
+needs no DNS records; your own domain needs an A record pointing at the relay):
+  rbridge publish 3000 --name demo --hostname demo.<relay-ip>.rbr.sh --access public --dry-run
+  rbridge publish 3000 --name demo --hostname demo.<relay-ip>.rbr.sh --access public
+  rbridge publish 3000 --name demo --hostname demo.example.com --access public
   rbridge list --show-endpoints
   rbridge status --json
   rbridge remove demo

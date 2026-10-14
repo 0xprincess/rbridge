@@ -1,11 +1,12 @@
 # rbridge
 
 ```bash
-rbridge publish 3000 --name demo --hostname demo.example.invalid --access public
+rbridge publish 3000 --name demo --hostname demo.<relay-ip>.rbr.sh --access public
 ```
 
-After a one-time setup, that command puts a local app on your own domain over
-HTTPS, through a relay you control, with no router port forwarding.
+After a one-time setup, that command puts a local app on HTTPS, under an
+`rbr.sh` name or your own domain, through a relay you control, with no router
+port forwarding.
 
 <p align="center">
   <img src="reference-dithered-16color.png" alt="「虹の橋」 Rainbow Bridge: dithered blue illustration of a suspension bridge seen through a window" width="400">
@@ -121,7 +122,7 @@ entry outside the checkout; `ssh-keyscan` alone does not establish trust.
 
 ```bash
 rbridge init \
-  --relay relay.example.invalid \
+  --relay relay.<relay-ip>.rbr.sh \
   --known-hosts "$HOME/.config/verified-relay-hosts" \
   --admin-key "$HOME/.ssh/relay-admin"
 rbridge plan
@@ -136,18 +137,30 @@ Review the generated inventory before `apply`, which deploys both hosts using
 Ansible. Omit `--ask-become-pass` when sudo is passwordless. Administrative SSH is
 non-interactive: load an encrypted administrative key into your agent first.
 
-Start your application on port 3000. Point a hostname you control to the relay
-and allow inbound relay SSH and TCP 80/443 for HTTPS/ACME. Firewall and DNS remain
-administrator-owned; never expose FRP control, relay-local, OIDC or admin ports.
+Start your application on port 3000 and allow inbound relay SSH and TCP 80/443
+for HTTPS/ACME. Each published hostname must resolve to the relay, either way:
+
+- **`rbr.sh` provides DNS:** it is a nip.io alias, so `<name>.<relay-ip>.rbr.sh`
+  resolves to `<relay-ip>` with no records to create. Replace `<relay-ip>` with
+  your relay's IPv4 address.
+- **Your own domain:** create an A record, such as `demo.example.com` →
+  `<relay-ip>`, and pass that hostname instead.
+
+Firewall and DNS remain administrator-owned; never expose FRP control,
+relay-local, OIDC or admin ports.
 
 ```bash
 # Preview only: no service file or host changes.
 rbridge publish 3000 --name demo \
-  --hostname demo.example.invalid --access public --dry-run
+  --hostname demo.<relay-ip>.rbr.sh --access public --dry-run
 
 # Deploy by default after displaying interruption impact.
 rbridge publish 3000 --name demo \
-  --hostname demo.example.invalid --access public --ask-become-pass
+  --hostname demo.<relay-ip>.rbr.sh --access public --ask-become-pass
+
+# Same publication on your own domain, once its A record points to the relay.
+rbridge publish 3000 --name demo \
+  --hostname demo.example.com --access public --ask-become-pass
 
 rbridge list --show-endpoints
 rbridge status --json

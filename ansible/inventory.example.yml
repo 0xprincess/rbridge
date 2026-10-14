@@ -1,7 +1,7 @@
 # Copy outside the checkout and replace the documentation-only values.
 all:
   vars:
-    frp_server_address: relay.example.invalid
+    frp_server_address: relay.<relay-ip>.rbr.sh
     frp_relay_ssh_port: 22
     frp_managed_ssh: true
     frp_services:
@@ -14,7 +14,7 @@ all:
         protocol: http
         backend: http://127.0.0.1:8080
         relay_port: 18080
-        hostname: app.example.invalid
+        hostname: app.<relay-ip>.rbr.sh  # or your own domain, e.g. app.example.com
         access:
           mode: application
     frp_backend_ssh_port: 2222
@@ -23,7 +23,7 @@ all:
     frp_servers:
       hosts:
         relay:
-          ansible_host: relay.example.invalid
+          ansible_host: relay.<relay-ip>.rbr.sh
           ansible_user: root
     frp_clients:
       hosts:

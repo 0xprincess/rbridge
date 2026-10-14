@@ -22,7 +22,7 @@ planner = load_module("bridge_plan", "scripts/bridge_plan.py")
 model = load_module("plan_service_model", "ansible/filter_plugins/frp_config.py")
 BCRYPT = "$2b$12$" + "a" * 53
 OIDC = {
-    "issuer_url": "https://identity.private.invalid",
+    "issuer_url": "https://identity.private.relay-ip.rbr.sh",
     "client_id": "private-client-identity",
     "client_secret": "private-oidc-secret",
     "cookie_secret": base64.urlsafe_b64encode(b"p" * 32).decode(),
@@ -36,7 +36,7 @@ def http_service(name="private-app", port=12080, mode="public"):
     if mode == "oidc":
         access.update(port=port + 1000, allowed_emails=["private-user@identity.invalid"])
     return {"name": name, "protocol": "http", "backend": "http://127.0.0.1:18080",
-            "relay_port": port, "hostname": name + ".example.invalid", "access": access}
+            "relay_port": port, "hostname": name + ".relay-ip.rbr.sh", "access": access}
 
 
 def tcp_service():
@@ -46,7 +46,7 @@ def tcp_service():
 
 def snapshot(services, **overrides):
     config = {"frp_token": "ab" * 32, "frp_oidc": deepcopy(OIDC),
-              "frp_server_address": "private-relay.example.invalid",
+              "frp_server_address": "private-relay.relay-ip.rbr.sh",
               "frp_admin_password": "private-admin-password", "frp_services": deepcopy(services)}
     config.update(deepcopy(overrides))
     normalized = model.normalize_services(services, oidc=config["frp_oidc"]) if services else []

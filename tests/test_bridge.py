@@ -24,7 +24,7 @@ SPEC.loader.exec_module(bridge)
 
 def web(name="demo", port=12000, access=None):
     return {"name": name, "protocol": "http", "backend": "http://127.0.0.1:3000",
-            "relay_port": port, "hostname": name + ".example.invalid", "access": access or {"mode": "public"}}
+            "relay_port": port, "hostname": name + ".relay-ip.rbr.sh", "access": access or {"mode": "public"}}
 
 
 class WorkspaceTests(unittest.TestCase):
@@ -32,14 +32,14 @@ class WorkspaceTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="bridge-regression-")
         self.addCleanup(self.temporary.cleanup)
         self.directory = Path(self.temporary.name)
-        self.variables = {"frp_managed_ssh": False, "frp_server_address": "relay.example.invalid", "frp_services": []}
-        self.pins = "relay.example.invalid ssh-ed25519 " + "A" * 48 + "\n"
+        self.variables = {"frp_managed_ssh": False, "frp_server_address": "relay.relay-ip.rbr.sh", "frp_services": []}
+        self.pins = "relay.relay-ip.rbr.sh ssh-ed25519 " + "A" * 48 + "\n"
         self.secrets: dict[str, Any] = {"frp_token": "ab" * 32, "frp_admin_password": "cd" * 32,
                                        "frp_relay_known_hosts": self.pins}
         self.save("services.yml", self.variables)
         self.save("secrets.yml", self.secrets)
         self.save("inventory.yml", {"all": {"children": {
-            "frp_servers": {"hosts": {"relay": {"ansible_host": "relay.example.invalid"}}},
+            "frp_servers": {"hosts": {"relay": {"ansible_host": "relay.relay-ip.rbr.sh"}}},
             "frp_clients": {"hosts": {"client": {"ansible_connection": "local"}}}}}})
         bridge.private_write(self.directory / "known_hosts", self.pins)
         bridge.private_write(self.directory / "admin.key", "private-fixture-key")
@@ -70,18 +70,18 @@ class WorkspaceTests(unittest.TestCase):
 
     def test_publish_preview_does_not_save_or_expose_private_values(self):
         before = (self.directory / "services.yml").read_bytes()
-        code, result, text = self.invoke("publish", "3000", "--name", "demo", "--hostname", "demo.example.invalid", "--access", "public", "--dry-run")
+        code, result, text = self.invoke("publish", "3000", "--name", "demo", "--hostname", "demo.relay-ip.rbr.sh", "--access", "public", "--dry-run")
         self.assertEqual(code, 0)
         self.assertFalse(result["applied"])
         self.assertEqual(result["plan"]["counts"]["adds"], 1)
         self.assertEqual((self.directory / "services.yml").read_bytes(), before)
         self.assertFalse((self.directory / "apply-pending.json").exists())
-        for private in ("demo.example.invalid", "relay.example.invalid", self.secrets["frp_token"], str(self.directory)):
+        for private in ("demo.relay-ip.rbr.sh", "relay.relay-ip.rbr.sh", self.secrets["frp_token"], str(self.directory)):
             self.assertNotIn(private, text)
 
     def test_default_publish_and_remove_commit_the_desired_state(self):
         for arguments, expected_names in (
-            (("publish", "3000", "--name", "demo", "--hostname", "demo.example.invalid", "--access", "public"), ["demo"]),
+            (("publish", "3000", "--name", "demo", "--hostname", "demo.relay-ip.rbr.sh", "--access", "public"), ["demo"]),
             (("remove", "demo"), []),
         ):
             with self.subTest(command=arguments[0]), \
@@ -110,7 +110,7 @@ class WorkspaceTests(unittest.TestCase):
             self.assertEqual({path.name: path.read_bytes() for path in self.directory.iterdir()}, before)
 
     def test_new_service_requires_access_but_update_preserves_existing_protection(self):
-        code, result, _ = self.invoke("publish", "3000", "--hostname", "demo.example.invalid")
+        code, result, _ = self.invoke("publish", "3000", "--hostname", "demo.relay-ip.rbr.sh")
         self.assertEqual(code, 2)
         self.assertFalse(result["ok"])
         access = {"mode": "basic", "users": {"private-user": "$2b$12$" + "a" * 53}}
@@ -124,14 +124,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(service["access"], access)
         self.assertEqual(service["relay_port"], 12000)
         self.assertEqual(service["backend"], "https://127.0.0.1:3443")
-        self.assertEqual(service["hostname"], "demo.example.invalid")
+        self.assertEqual(service["hostname"], "demo.relay-ip.rbr.sh")
         self.assertEqual(workspace["variables"], self.variables)
 
     def test_allocator_avoids_control_tcp_and_oidc_listeners(self):
         self.variables.update(frp_server_port=12000, frp_relay_ssh_port=12001, frp_server_admin_port=12002)
-        self.pins = "[relay.example.invalid]:12001 ssh-ed25519 " + "A" * 48 + "\n"
+        self.pins = "[relay.relay-ip.rbr.sh]:12001 ssh-ed25519 " + "A" * 48 + "\n"
         self.secrets["frp_relay_known_hosts"] = self.pins
-        self.secrets["frp_oidc"] = {"issuer_url": "https://identity.example.invalid", "client_id": "fixture",
+        self.secrets["frp_oidc"] = {"issuer_url": "https://identity.relay-ip.rbr.sh", "client_id": "fixture",
                                    "client_secret": "private-provider-value", "cookie_secret": base64.urlsafe_b64encode(bytes(32)).decode()}
         self.variables["frp_services"] = [
             {"name": "tcp", "protocol": "tcp", "backend": "127.0.0.1:9999", "relay_port": 12003, "public_port": 12004},
@@ -142,7 +142,7 @@ class WorkspaceTests(unittest.TestCase):
         policy = self.directory / "policy.yml"
         self.save(policy.name, {"mode": "oidc", "allowed_domains": ["example.invalid"]})
         workspace = bridge.load_workspace(self.directory)
-        changed = bridge.publish_variables(workspace, self.publish_args("--hostname", "demo.example.invalid", "--access-file", str(policy)))
+        changed = bridge.publish_variables(workspace, self.publish_args("--hostname", "demo.relay-ip.rbr.sh", "--access-file", str(policy)))
         self.assertEqual(changed["frp_services"][-1]["relay_port"], 12007)
         self.assertEqual(changed["frp_services"][-1]["access"]["port"], 12008)
         self.assertEqual(len(bridge.snapshot(workspace, changed)["services"]), 3)
@@ -151,13 +151,13 @@ class WorkspaceTests(unittest.TestCase):
         before = (self.directory / "services.yml").read_bytes()
         for target in ("0", "65536", "http://host:8080/private", "http://" + "user:secret@host:8080"):
             with self.subTest(target=target):
-                code, result, _ = self.invoke("publish", target, "--hostname", "demo.example.invalid", "--access", "public")
+                code, result, _ = self.invoke("publish", target, "--hostname", "demo.relay-ip.rbr.sh", "--access", "public")
                 self.assertEqual(code, 2)
                 self.assertFalse(result["ok"])
                 self.assertEqual((self.directory / "services.yml").read_bytes(), before)
         policy = self.directory / "policy.yml"
         self.save(policy.name, {"mode": "oidc", "port": [], "allowed_domains": ["example.invalid"]})
-        code, _, _ = self.invoke("publish", "3000", "--hostname", "demo.example.invalid", "--access-file", str(policy))
+        code, _, _ = self.invoke("publish", "3000", "--hostname", "demo.relay-ip.rbr.sh", "--access-file", str(policy))
         self.assertEqual(code, 2)
         self.assertEqual((self.directory / "services.yml").read_bytes(), before)
 
@@ -177,7 +177,7 @@ class WorkspaceTests(unittest.TestCase):
         previous = self.save_baseline()
         with patch.object(bridge.shutil, "which", return_value="/fixture/ansible"), \
              patch.object(bridge.subprocess, "run", side_effect=self.deployment_result(7)):
-            code, result, text = self.invoke("publish", "3000", "--name", "demo", "--hostname", "demo.example.invalid", "--access", "public")
+            code, result, text = self.invoke("publish", "3000", "--name", "demo", "--hostname", "demo.relay-ip.rbr.sh", "--access", "public")
         self.assertEqual(code, 1)
         self.assertEqual(result["deployment"], "incomplete")
         self.assertTrue((self.directory / "apply-pending.json").exists())
@@ -185,7 +185,7 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(bridge.load_workspace(self.directory)["variables"]["frp_services"][0]["name"], "demo")
         self.assertEqual(self.invoke("plan")[1]["plan"]["baseline"], "uncertain")
         self.assertEqual((self.directory / "apply.log").stat().st_mode & 0o777, 0o600)
-        self.assertNotIn("demo.example.invalid", text)
+        self.assertNotIn("demo.relay-ip.rbr.sh", text)
         self.assertFalse(list(self.directory.glob(".bridge-apply-*")))
 
     def test_successful_retry_commits_baseline_and_clears_uncertainty(self):
@@ -210,7 +210,7 @@ class WorkspaceTests(unittest.TestCase):
         before = (self.directory / "services.yml").read_bytes()
         with patch.object(bridge.shutil, "which", return_value="/fixture/ansible"), \
              patch.object(bridge.subprocess, "run", side_effect=self.deployment_result(0, inventory={})):
-            code, result, _ = self.invoke("publish", "3000", "--hostname", "demo.example.invalid", "--access", "public")
+            code, result, _ = self.invoke("publish", "3000", "--hostname", "demo.relay-ip.rbr.sh", "--access", "public")
         self.assertEqual(code, 2)
         self.assertFalse(result["ok"])
         self.assertFalse((self.directory / "last-applied.json").exists())
@@ -220,7 +220,7 @@ class WorkspaceTests(unittest.TestCase):
     def test_unavailable_controller_cannot_save_a_publication(self):
         before = (self.directory / "services.yml").read_bytes()
         with patch.object(bridge.shutil, "which", return_value=None):
-            code, _, _ = self.invoke("publish", "3000", "--hostname", "demo.example.invalid", "--access", "public")
+            code, _, _ = self.invoke("publish", "3000", "--hostname", "demo.relay-ip.rbr.sh", "--access", "public")
         self.assertEqual(code, 2)
         self.assertFalse((self.directory / "apply-pending.json").exists())
         self.assertEqual((self.directory / "services.yml").read_bytes(), before)
@@ -260,14 +260,14 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIsNone(result["ok"])
         self.assertEqual(result["services"][0]["health"], "not_checked")
-        self.assertNotIn("demo.example.invalid", text)
+        self.assertNotIn("demo.relay-ip.rbr.sh", text)
         disclosed = self.invoke("list", "--show-endpoints")[1]
-        self.assertEqual(disclosed["services"][0]["endpoint"], "https://demo.example.invalid/")
+        self.assertEqual(disclosed["services"][0]["endpoint"], "https://demo.relay-ip.rbr.sh/")
 
     @unittest.skipUnless(shutil.which("ssh-keygen"), "OpenSSH key generator required")
     def test_web_first_init_creates_idle_workspace_without_login_identity(self):
         destination = self.directory / "new-private"
-        args = bridge.parser().parse_args(["init", "--private-dir", str(destination), "--relay", "relay.example.invalid",
+        args = bridge.parser().parse_args(["init", "--private-dir", str(destination), "--relay", "relay.relay-ip.rbr.sh",
                                            "--known-hosts", str(self.directory / "known_hosts"), "--admin-key", str(self.directory / "admin.key")])
         result = bridge.execute(args)
         self.assertTrue(result["initialized"])

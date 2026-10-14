@@ -59,13 +59,15 @@ python scripts/field-test.py \
   --inventory "$PRIVATE/inventory.yml" \
   --ssh-config "$PRIVATE/ssh_config" \
   --relay-ssh relay --client-ssh origin \
-  --address 203.0.113.10 --domain field.example.invalid --user developer \
+  --address <relay-ip> --domain field.<relay-ip>.rbr.sh --user developer \
   --require-dns --public-tls --artifacts "$PRIVATE/test-logs"
 ```
 
 Replace documentation-only values. For public ACME tests, all of `public`,
 `basic`, `app`, `oidc`, `secure`, and `idp` under the selected domain must resolve
-to the relay. Without `--public-tls`, the suite deliberately trusts Caddy's
+to the relay: `field.<relay-ip>.rbr.sh` does so through the `rbr.sh` nip.io alias
+without DNS records, or use a domain you control, such as `field.example.com`,
+with matching A records. Without `--public-tls`, the suite deliberately trusts Caddy's
 internal CA for its isolated browser/test processes; public browser trust is a
 separate property and must not be inferred from that mode.
 

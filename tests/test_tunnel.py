@@ -37,9 +37,9 @@ prepare = load_script("prepare-ci-deployment")
 
 
 def config():
-    return {"frp_managed_ssh": False, "frp_server_address": "relay.example.invalid",
+    return {"frp_managed_ssh": False, "frp_server_address": "relay.relay-ip.rbr.sh",
             "frp_services": [{"name": "app", "protocol": "http", "backend": "http://127.0.0.1:18080",
-                              "relay_port": 12080, "hostname": "app.example.invalid", "access": {"mode": "public"}}]}
+                              "relay_port": 12080, "hostname": "app.relay-ip.rbr.sh", "access": {"mode": "public"}}]}
 
 
 @contextmanager
@@ -146,7 +146,7 @@ class ConfigTests(unittest.TestCase):
                 status = tunnel.main(["validate", "--config", str(path), "--json"])
             self.assertEqual(status, 2)
             self.assertFalse(json.loads(output.getvalue())["ok"])
-            self.assertNotIn("app.example.invalid", output.getvalue())
+            self.assertNotIn("app.relay-ip.rbr.sh", output.getvalue())
 
     def test_admin_config_never_sends_credentials_to_remote_host(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -198,16 +198,16 @@ class HTTPTests(unittest.TestCase):
                 self.assertEqual(len(requests), len(policies))
 
     def test_no_redirect_following_or_environment_proxy(self):
-        with http_server(302, headers={"Location": "http://redirect.example.invalid/"}) as (port, requests):
-            with patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.example.invalid:9999"}):
+        with http_server(302, headers={"Location": "http://redirect.relay-ip.rbr.sh/"}) as (port, requests):
+            with patch.dict(os.environ, {"HTTP_PROXY": "http://proxy.relay-ip.rbr.sh:9999"}):
                 result = tunnel.http_request("127.0.0.1", port, "http", 1)
             self.assertEqual(result["code"], 302)
             self.assertEqual(len(requests), 1)
 
     def test_host_header_preserved_while_connecting_to_relay(self):
         with http_server() as (port, requests):
-            tunnel.http_request("backend.example.invalid", port, "http", 1, connect_host="127.0.0.1", headers={"Host": "app.example.invalid"})
-            self.assertEqual(requests[0][1], "app.example.invalid")
+            tunnel.http_request("backend.relay-ip.rbr.sh", port, "http", 1, connect_host="127.0.0.1", headers={"Host": "app.relay-ip.rbr.sh"})
+            self.assertEqual(requests[0][1], "app.relay-ip.rbr.sh")
 
     def test_api_requires_authenticated_200_and_parses_real_body(self):
         body = json.dumps({"tcp": [{"name": "app", "status": "running", "err": ""}]}).encode()
@@ -313,7 +313,7 @@ class DoctorTests(unittest.TestCase):
         private = "sensitive-backend-error"
         result = self.diagnose([{"code": 200, "body": {"tcp": [{"name": "app", "status": "start error", "err": private}]}}, {"error": "connection"}, {"error": "connection"}])
         output = json.dumps(result)
-        for secret in (private, "private-test-value", "app.example.invalid", "relay.example.invalid"):
+        for secret in (private, "private-test-value", "app.relay-ip.rbr.sh", "relay.relay-ip.rbr.sh"):
             self.assertNotIn(secret, output)
 
 
@@ -321,7 +321,7 @@ class BulkTests(unittest.TestCase):
     def diagnose_output(self, output, returncode=0):
         with tempfile.TemporaryDirectory() as folder:
             profile = Path(folder) / "client.conf"
-            profile.write_text("Host fixture\n  HostName relay.example.invalid\n")
+            profile.write_text("Host fixture\n  HostName relay.relay-ip.rbr.sh\n")
             response = subprocess.CompletedProcess([], returncode, output, b"")
             with patch.object(tunnel, "_ssh_run", return_value=response):
                 return tunnel.bulk_check(profile, "fixture", 1, 1)
@@ -377,11 +377,11 @@ class GenerationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             pins = root / "pins"
-            pins.write_text("relay.example.invalid ssh-" + "ed25519 " + "A" * 48 + "\n")
+            pins.write_text("relay.relay-ip.rbr.sh ssh-" + "ed25519 " + "A" * 48 + "\n")
             services = root / "services.yml"
             services.write_text(yaml.safe_dump(config()))
             destination = root / "private"
-            args = argparse.Namespace(output=destination, server_host="relay.example.invalid", client_user=None,
+            args = argparse.Namespace(output=destination, server_host="relay.relay-ip.rbr.sh", client_user=None,
                                       relay_port=22, known_hosts=pins, admin_user="root", no_managed_ssh=True, services_file=services)
             previous_umask = os.umask(0o077)
             try:

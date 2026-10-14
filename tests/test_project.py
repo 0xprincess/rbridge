@@ -40,7 +40,7 @@ class PrivacyTests(unittest.TestCase):
         self.assertFalse(privacy.findings(b"fixture@example.test"))
 
     def test_email_and_url_credentials_are_rejected(self):
-        candidate = b"person" + b"@mail.net https://" + b"user:pass@relay.example.invalid"
+        candidate = b"person" + b"@mail.net https://" + b"user:pass@" + b"relay.relay-ip.rbr.sh"
         kinds = {kind for _, kind in privacy.findings(candidate)}
         self.assertIn("personal email address", kinds)
         self.assertIn("credential in URL", kinds)
@@ -64,15 +64,15 @@ class InputTests(unittest.TestCase):
                 secrets.validate_host(value)
 
     def test_dns_and_documentation_ip_are_valid(self):
-        self.assertEqual(secrets.validate_host("relay.example.invalid"), "relay.example.invalid")
+        self.assertEqual(secrets.validate_host("relay.relay-ip.rbr.sh"), "relay.relay-ip.rbr.sh")
         self.assertEqual(secrets.validate_host("203.0.113.10"), "203.0.113.10")
 
     def test_host_pin_must_match_endpoint_and_port(self):
         key = "ssh-" + "ed25519 " + "A" * 48
-        text = "[relay.example.invalid]:2200 " + key
-        self.assertTrue(secrets.pinned_hosts(text, "relay.example.invalid", 2200))
+        text = "[relay.relay-ip.rbr.sh]:2200 " + key
+        self.assertTrue(secrets.pinned_hosts(text, "relay.relay-ip.rbr.sh", 2200))
         with self.assertRaises(ValueError):
-            secrets.pinned_hosts(text, "relay.example.invalid", 22)
+            secrets.pinned_hosts(text, "relay.relay-ip.rbr.sh", 22)
 
     def test_existing_secret_directory_cannot_be_overwritten(self):
         with tempfile.TemporaryDirectory() as folder:
