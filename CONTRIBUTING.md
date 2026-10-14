@@ -122,5 +122,12 @@ python scripts/distro-test.py --image fedora:latest
 It deploys relay and origin into one container twice, requires the second run to
 change nothing, then checks native SSH/SFTP through the public TCP publication
 and HTTPS through Caddy's internal CA. CI runs it for every supported family.
-Containers do not enforce SELinux or AppArmor; verify policy-sensitive changes
-on an enforcing VM (for example an AlmaLinux or Fedora cloud image).
+These containers do not validate SELinux or AppArmor policy. Ubuntu's host
+`unix-chkpwd` AppArmor profile can still auto-attach to the PAM helper inside a
+privileged container and deny access to RHEL-family mode-000 shadow files.
+The distribution CI job temporarily unloads only that profile on its disposable
+runner and restores it with an exit trap, including when the test fails. It does
+not change the distribution's PAM rules, shadow permissions or SSH restrictions.
+If a local run encounters this conflict, use a disposable VM rather than
+weakening a workstation's security policy. Verify policy-sensitive deployment
+changes on an enforcing VM (for example an AlmaLinux or Fedora cloud image).

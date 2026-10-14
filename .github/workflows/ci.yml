@@ -80,7 +80,16 @@ jobs:
           python-version: '3.12'
       - run: python -m pip install -r requirements-dev.txt
       - name: Deploy the real roles into a disposable systemd container
-        run: python scripts/distro-test.py --image '${{ matrix.image }}'
+        run: |
+          # Ubuntu's host PAM profile auto-attaches inside privileged containers
+          # and denies access to RHEL-family mode-000 shadow files. Isolate this
+          # disposable runner's policy, not the distributions' PAM/SSH settings.
+          profile=/etc/apparmor.d/unix-chkpwd
+          if [ -f "$profile" ]; then
+            trap 'sudo apparmor_parser -r "$profile"' EXIT
+            sudo apparmor_parser -R "$profile"
+          fi
+          python scripts/distro-test.py --image '${{ matrix.image }}'
 
   windows-startup-syntax:
     runs-on: windows-latest
