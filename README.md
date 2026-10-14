@@ -4,7 +4,7 @@
 rbridge publish 3000 --name demo --hostname demo.<relay-ip>.rbr.sh --access public
 ```
 
-After a one-time setup, that command puts a local app on HTTPS, under an
+This command puts a local app on HTTPS, under an
 `rbr.sh` name or your own domain, through a relay you control, with no router
 port forwarding.
 
@@ -12,18 +12,20 @@ port forwarding.
   <img src="reference-dithered-16color.png" alt="「虹の橋」 Rainbow Bridge: dithered blue illustration of a suspension bridge seen through a window" width="400">
 </p>
 
+rbridge (short for Rainbow Bridge) is a self-hosted alternative to Cloudflare Tunnel for publishing web apps and TCP
+services. You provision, secure, and pay for the relay (cheapest VPS is usually sufficient). Native TCP
+clients need no tunnel-specific software.
+
 rbridge runs on modern systemd Linux distributions, including WSL2, and
 publishes web applications and TCP services with
-[FRP](https://github.com/fatedier/frp). Ansible manages FRP over an
-outbound, host-pinned SSH connection; systemd reconnects it. Caddy publishes
-HTTPS, with optional Basic authentication or OIDC browser login. The
+[FRP](https://github.com/fatedier/frp). </br>
+*Ansible* manages FRP over an
+outbound, host-pinned SSH connection; systemd reconnects it. </br>
+*Caddy* publishes HTTPS, with optional Basic authentication or OIDC browser login. The
 origin-to-relay transport is direct SSH. Native SSH clients on filtered
 networks can use an [explicit SOCKS access profile](docs/operations.md#native-ssh-access-on-filtered-networks).
 
-A self-hosted alternative to Cloudflare Tunnel for publishing web apps and TCP
-services—not a replacement for Cloudflare's global network, WAF, CDN, VPN, or
-identity platform. You provision, secure, and pay for the relay. Native TCP
-clients need no tunnel-specific software.
+
 
 See the [Cloudflare Tunnel and Tailscale comparison](docs/comparison.md) for
 matched measurements of this project, Cloudflare Quick Tunnel, Tailscale private
@@ -67,7 +69,7 @@ application has no public raw port that could bypass its access policy.
 
 ## Install the CLI
 
-From this checkout, on any Linux distribution or WSL:
+On any Linux distribution or WSL:
 
 ```bash
 sh install.sh
@@ -75,17 +77,14 @@ export PATH="$HOME/.local/bin:$PATH"
 rbridge --help
 ```
 
-Add that PATH setting to your shell profile if needed. The installer requires
-Python 3.11+ with `venv`/pip support, OpenSSH, `tar`, and Internet access for Python
+Installer requirements: Python 3.11+ with `venv`/pip, OpenSSH, `tar`, and internet access for Python
 dependencies. If virtualenv creation fails, install your distribution's venv
 support (for example `python3-venv` on Debian/Ubuntu).
 No sudo is needed for installation.
 
-The command is installed at `~/.local/bin/rbridge`. Its isolated Python
+CLI installs at `~/.local/bin/rbridge`. Its isolated Python
 environment and bundled Ansible playbook/roles live under
-`~/.local/share/rbridge`; commands work from any directory without activating a
-virtualenv or retaining this checkout. No private inventory, secrets, `.env`,
-logs or Git history are copied from the checkout.
+`~/.local/share/rbridge`.
 
 For another location/interpreter, use
 `sh install.sh --prefix /path/to/prefix --python python3.12`, then add that
